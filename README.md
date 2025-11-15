@@ -96,16 +96,14 @@ _oo = math.abs(open[1] - close[2]);
 ### Running PineTS Code
 
 ```javascript
-import { PineTS, Providers } from 'pinets';
+import { PineTS, Provider } from 'pinets';
 
 // Initialize with market data
-
-const pineTS = new PineTS(Providers.Binance, 'BTCUSDT', 'D', 100);
+const pineTS = new PineTS(Provider.Binance, 'BTCUSDT', 'D', 100);
 
 // Run your indicator
 const { result } = await pineTS.run((context) => {
-    const ta = context.ta;
-    const math = context.math;
+    const { ta, math } = context;
     const { close, open } = context.data;
 
     const ema9 = ta.ema(close, 9);
@@ -119,8 +117,12 @@ const { result } = await pineTS.run((context) => {
 
     let _oo = open;
     _oo = math.abs(open[1] - close[2]);
+
+    return { ema9, ema18, bull_bias, bear_bias };
 });
 ```
+
+> **📖 For detailed documentation on initialization options, parameters, and advanced usage, see the [Initialization and Usage Guide](https://alaa-eddine.github.io/PineTS/initialization-and-usage/)**
 
 ## Key Differences from Pine Script
 
