@@ -176,8 +176,9 @@ export class TechnicalAnalysis {
         const halfPeriod = Math.floor(period / 2);
         const sqrtPeriod = Math.floor(Math.sqrt(period));
 
-        const wma1 = this.wma(source, halfPeriod);
-        const wma2 = this.wma(source, period);
+        // Pass derived call IDs to internal WMA calls to avoid state collision
+        const wma1 = this.wma(source, halfPeriod, _callId ? `${_callId}_wma1` : undefined);
+        const wma2 = this.wma(source, period, _callId ? `${_callId}_wma2` : undefined);
 
         if (isNaN(wma1) || isNaN(wma2)) {
             return NaN;
@@ -197,7 +198,7 @@ export class TechnicalAnalysis {
         this.context.taState[stateKey].unshift(rawHma);
 
         // Apply WMA to the raw HMA values
-        const hmaStateKey = `hma_final_${period}`;
+        const hmaStateKey = _callId ? `${_callId}_hma_final` : `hma_final_${period}`;
         if (!this.context.taState[hmaStateKey]) {
             this.context.taState[hmaStateKey] = { window: [] };
         }
@@ -301,25 +302,25 @@ export class TechnicalAnalysis {
                 avgLoss: 0,
                 initGains: [],
                 initLosses: [],
-                initCount: 0,
             };
         }
 
         const state = this.context.taState[stateKey];
         const currentValue = source[0];
 
+        // Calculate gain/loss from previous value
         if (state.prevValue !== null) {
             const diff = currentValue - state.prevValue;
             const gain = diff > 0 ? diff : 0;
             const loss = diff < 0 ? -diff : 0;
 
-            if (state.initCount < period) {
-                // Accumulate initial gains/losses
+            // Accumulate gains/losses until we have 'period' values
+            if (state.initGains.length < period) {
                 state.initGains.push(gain);
                 state.initLosses.push(loss);
-                state.initCount++;
 
-                if (state.initCount === period) {
+                // Once we have 'period' gain/loss pairs, calculate first RSI
+                if (state.initGains.length === period) {
                     // Calculate first RSI using simple averages
                     state.avgGain = state.initGains.reduce((a, b) => a + b, 0) / period;
                     state.avgLoss = state.initLosses.reduce((a, b) => a + b, 0) / period;
@@ -332,7 +333,7 @@ export class TechnicalAnalysis {
                 return NaN;
             }
 
-            // Calculate RSI using smoothed averages
+            // Calculate RSI using smoothed averages (Wilder's smoothing)
             state.avgGain = (state.avgGain * (period - 1) + gain) / period;
             state.avgLoss = (state.avgLoss * (period - 1) + loss) / period;
 
@@ -341,6 +342,7 @@ export class TechnicalAnalysis {
             return this.context.precision(rsi);
         }
 
+        // First bar - just store the value
         state.prevValue = currentValue;
         return NaN;
     }
@@ -712,8 +714,8 @@ export class TechnicalAnalysis {
         const low = this.context.data.low[0];
         const close = this.context.data.close[0];
 
-        // Get ATR value (already optimized)
-        const atrValue = this.atr(atrPeriod);
+        // Get ATR value (already optimized) - use derived call ID
+        const atrValue = this.atr(atrPeriod, _callId ? `${_callId}_atr` : undefined);
 
         if (isNaN(atrValue)) {
             return [[NaN, 0]];
