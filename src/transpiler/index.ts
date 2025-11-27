@@ -100,7 +100,7 @@ export function transpile(fn: string | Function, options: { debug: boolean; ln?:
 
     // Generate final code
     // astring exports baseGenerator (camelCase) in this version/build
-    const baseGenerator = astring.baseGenerator || astring.GENERATOR || (astring.default && astring.default.BASE_GENERATOR);
+    const baseGenerator = astring.baseGenerator || astring.GENERATOR || ((astring as any).default && (astring as any).default.BASE_GENERATOR);
 
     const customGenerator = Object.assign({}, baseGenerator, {
         LineComment(node: any, state: any) {

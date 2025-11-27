@@ -7237,6 +7237,11 @@
 
   const EMPTY_OBJECT = {};
 
+  /*
+  DEPRECATED: Alternate export of `GENERATOR`.
+  */
+  const baseGenerator = GENERATOR;
+
   class State {
     constructor(options) {
       const setup = options == null ? EMPTY_OBJECT : options;
@@ -7382,6 +7387,7 @@
       __publicField$9(this, "contextBoundVars", /* @__PURE__ */ new Set());
       __publicField$9(this, "arrayPatternElements", /* @__PURE__ */ new Set());
       __publicField$9(this, "rootParams", /* @__PURE__ */ new Set());
+      __publicField$9(this, "localSeriesVars", /* @__PURE__ */ new Set());
       __publicField$9(this, "varKinds", /* @__PURE__ */ new Map());
       __publicField$9(this, "loopVars", /* @__PURE__ */ new Set());
       __publicField$9(this, "loopVarNames", /* @__PURE__ */ new Map());
@@ -7390,6 +7396,8 @@
       __publicField$9(this, "cacheIdCounter", 0);
       __publicField$9(this, "tempVarCounter", 0);
       __publicField$9(this, "taCallIdCounter", 0);
+      __publicField$9(this, "hoistingStack", []);
+      __publicField$9(this, "suppressHoisting", false);
       this.pushScope("glb");
     }
     get nextParamIdArg() {
@@ -7424,6 +7432,12 @@
     }
     getCurrentScopeCount() {
       return this.scopeCounts.get(this.getCurrentScopeType()) || 1;
+    }
+    addLocalSeriesVar(name) {
+      this.localSeriesVars.add(name);
+    }
+    isLocalSeriesVar(name) {
+      return this.localSeriesVars.has(name);
     }
     addContextBoundVar(name, isRootParam = false) {
       this.contextBoundVars.add(name);
@@ -7495,6 +7509,28 @@
     }
     generateTempVar() {
       return `temp_${++this.tempVarCounter}`;
+    }
+    // Hoisting Logic
+    enterHoistingScope() {
+      this.hoistingStack.push([]);
+    }
+    exitHoistingScope() {
+      return this.hoistingStack.pop() || [];
+    }
+    addHoistedStatement(stmt) {
+      if (this.hoistingStack.length > 0 && !this.suppressHoisting) {
+        this.hoistingStack[this.hoistingStack.length - 1].push(stmt);
+      }
+    }
+    setSuppressHoisting(suppress) {
+      this.suppressHoisting = suppress;
+    }
+    shouldSuppressHoisting() {
+      return this.suppressHoisting;
+    }
+    // Param ID Generator Helper (for hoisting)
+    generateParamId() {
+      return `p${this.paramIdCounter++}`;
     }
   }
 
@@ -7904,8 +7940,283 @@
           ]
         }
       };
+    },
+    createVariableDeclaration(name, init) {
+      return {
+        type: "VariableDeclaration",
+        kind: "const",
+        declarations: [
+          {
+            type: "VariableDeclarator",
+            id: this.createIdentifier(name),
+            init
+          }
+        ]
+      };
     }
   };
+
+  function injectImplicitImports(ast) {
+    let mainBody = null;
+    let contextParamName = CONTEXT_NAME;
+    if (ast.type === "Program" && ast.body.length > 0) {
+      const firstStmt = ast.body[0];
+      if (firstStmt.type === "ExpressionStatement" && (firstStmt.expression.type === "ArrowFunctionExpression" || firstStmt.expression.type === "FunctionExpression")) {
+        const fn = firstStmt.expression;
+        if (fn.body.type === "BlockStatement") {
+          mainBody = fn.body.body;
+          if (fn.params.length > 0 && fn.params[0].type === "Identifier") {
+            contextParamName = fn.params[0].name;
+          }
+        }
+      }
+    }
+    if (!mainBody) return;
+    const declaredVars = /* @__PURE__ */ new Set();
+    const usedIdentifiers = /* @__PURE__ */ new Set();
+    const addDeclared = (pattern) => {
+      if (pattern.type === "Identifier") {
+        declaredVars.add(pattern.name);
+      } else if (pattern.type === "ObjectPattern") {
+        pattern.properties.forEach((p) => addDeclared(p.value));
+      } else if (pattern.type === "ArrayPattern") {
+        pattern.elements.forEach((e) => {
+          if (e) addDeclared(e);
+        });
+      }
+    };
+    recursive(ast, {}, {
+      VariableDeclarator(node, state, c) {
+        addDeclared(node.id);
+        if (node.init) c(node.init, state);
+      },
+      FunctionDeclaration(node, state, c) {
+        addDeclared(node.id);
+        c(node.body, state);
+      },
+      Identifier(node, state, c) {
+        usedIdentifiers.add(node.name);
+      },
+      MemberExpression(node, state, c) {
+        c(node.object, state);
+        if (node.computed) {
+          c(node.property, state);
+        }
+      },
+      Property(node, state, c) {
+        if (node.computed) {
+          c(node.key, state);
+        }
+        c(node.value, state);
+      }
+    });
+    mainBody.forEach((stmt) => {
+      if (stmt.type === "VariableDeclaration") {
+        stmt.declarations.forEach((d) => addDeclared(d.id));
+      } else if (stmt.type === "FunctionDeclaration") {
+        addDeclared(stmt.id);
+      }
+    });
+    const contextDataVars = [
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "hl2",
+      "hlc3",
+      "ohlc4",
+      "openTime",
+      "closeTime"
+    ];
+    const contextPineVars = [
+      "input",
+      "ta",
+      "math",
+      "request",
+      "array",
+      "na",
+      "plotchar",
+      "color",
+      "plot",
+      "nz",
+      "strategy",
+      "library",
+      "str",
+      "box",
+      "line",
+      "label",
+      "table",
+      "map",
+      "matrix"
+    ];
+    const missingDataVars = contextDataVars.filter((v) => !declaredVars.has(v));
+    const missingPineVars = contextPineVars.filter((v) => !declaredVars.has(v));
+    const neededDataVars = missingDataVars.filter((v) => usedIdentifiers.has(v));
+    const neededPineVars = missingPineVars.filter((v) => usedIdentifiers.has(v));
+    const injections = [];
+    if (neededDataVars.length > 0) {
+      injections.push({
+        type: "VariableDeclaration",
+        kind: "const",
+        declarations: [{
+          type: "VariableDeclarator",
+          id: {
+            type: "ObjectPattern",
+            properties: neededDataVars.map((name) => ({
+              type: "Property",
+              key: { type: "Identifier", name },
+              value: { type: "Identifier", name },
+              kind: "init",
+              shorthand: true
+            }))
+          },
+          init: {
+            type: "MemberExpression",
+            object: { type: "Identifier", name: contextParamName },
+            property: { type: "Identifier", name: "data" },
+            computed: false
+          }
+        }]
+      });
+    }
+    if (neededPineVars.length > 0) {
+      injections.push({
+        type: "VariableDeclaration",
+        kind: "const",
+        declarations: [{
+          type: "VariableDeclarator",
+          id: {
+            type: "ObjectPattern",
+            properties: neededPineVars.map((name) => ({
+              type: "Property",
+              key: { type: "Identifier", name },
+              value: { type: "Identifier", name },
+              kind: "init",
+              shorthand: true
+            }))
+          },
+          init: {
+            type: "MemberExpression",
+            object: { type: "Identifier", name: contextParamName },
+            property: { type: "Identifier", name: "pine" },
+            computed: false
+          }
+        }]
+      });
+    }
+    if (injections.length > 0) {
+      mainBody.unshift(...injections);
+    }
+  }
+
+  function normalizeNativeImports(ast) {
+    let mainBody = null;
+    let contextParamName = CONTEXT_NAME;
+    if (ast.type === "Program" && ast.body.length > 0) {
+      const firstStmt = ast.body[0];
+      if (firstStmt.type === "ExpressionStatement" && (firstStmt.expression.type === "ArrowFunctionExpression" || firstStmt.expression.type === "FunctionExpression")) {
+        const fn = firstStmt.expression;
+        if (fn.body.type === "BlockStatement") {
+          mainBody = fn.body.body;
+          if (fn.params.length > 0 && fn.params[0].type === "Identifier") {
+            contextParamName = fn.params[0].name;
+          }
+        }
+      }
+    }
+    if (!mainBody) return;
+    const contextDataVars = /* @__PURE__ */ new Set(["open", "high", "low", "close", "volume", "hl2", "hlc3", "ohlc4", "openTime", "closeTime"]);
+    const contextPineVars = /* @__PURE__ */ new Set([
+      "input",
+      "ta",
+      "math",
+      "request",
+      "array",
+      "na",
+      "plotchar",
+      "color",
+      "plot",
+      "nz",
+      "strategy",
+      "library",
+      "str",
+      "box",
+      "line",
+      "label",
+      "table",
+      "map",
+      "matrix"
+    ]);
+    const contextCoreVars = /* @__PURE__ */ new Set(["na", "nz", "plot", "plotchar", "color"]);
+    const renames = /* @__PURE__ */ new Map();
+    mainBody.forEach((stmt) => {
+      if (stmt.type === "VariableDeclaration") {
+        stmt.declarations.forEach((decl) => {
+          if (decl.init && decl.init.type === "MemberExpression" && decl.init.object.type === "Identifier" && decl.init.object.name === contextParamName && decl.init.property.type === "Identifier") {
+            const sourceName = decl.init.property.name;
+            let validNames = null;
+            if (sourceName === "data") {
+              validNames = contextDataVars;
+            } else if (sourceName === "pine") {
+              validNames = contextPineVars;
+            } else if (sourceName === "core") {
+              validNames = contextCoreVars;
+            }
+            if (validNames && decl.id.type === "ObjectPattern") {
+              decl.id.properties.forEach((prop) => {
+                if (prop.type === "Property" && prop.key.type === "Identifier" && prop.value.type === "Identifier") {
+                  const originalName = prop.key.name;
+                  const aliasName = prop.value.name;
+                  if (validNames.has(originalName) && originalName !== aliasName) {
+                    renames.set(aliasName, originalName);
+                    prop.value.name = originalName;
+                    prop.shorthand = true;
+                  }
+                }
+              });
+            } else if (decl.id.type === "Identifier") {
+              const validSingletonNames = ["ta", "math", "input", "request", "array"];
+              if (validSingletonNames.includes(sourceName)) {
+                const originalName = sourceName;
+                const aliasName = decl.id.name;
+                if (originalName !== aliasName) {
+                  renames.set(aliasName, originalName);
+                  decl.id.name = originalName;
+                }
+              }
+            }
+          }
+        });
+      }
+    });
+    if (renames.size > 0) {
+      recursive(
+        ast,
+        {},
+        {
+          Identifier(node) {
+            if (renames.has(node.name)) {
+              node.name = renames.get(node.name);
+            }
+          },
+          // Prevent renaming of non-computed property keys
+          MemberExpression(node, state, c) {
+            c(node.object, state);
+            if (node.computed) {
+              c(node.property, state);
+            }
+          },
+          Property(node, state, c) {
+            if (node.computed) {
+              c(node.key, state);
+            }
+            c(node.value, state);
+          }
+        }
+      );
+    }
+  }
 
   function transformNestedArrowFunctions(ast) {
     recursive(ast, null, {
@@ -8093,6 +8404,13 @@
   }
   function transformIdentifier(node, scopeManager) {
     if (node.name !== CONTEXT_NAME) {
+      if (node.name === "na") {
+        const isFunctionCall2 = node.parent && node.parent.type === "CallExpression" && node.parent.callee === node;
+        if (!isFunctionCall2) {
+          node.name = "NaN";
+          return;
+        }
+      }
       if (node.name === "Math" || node.name === "NaN" || node.name === "undefined" || node.name === "Infinity" || node.name === "null" || node.name.startsWith("'") && node.name.endsWith("'") || node.name.startsWith('"') && node.name.endsWith('"') || node.name.startsWith("`") && node.name.endsWith("`")) {
         return;
       }
@@ -8105,12 +8423,28 @@
       const isNamespaceMember = node.parent && node.parent.type === "MemberExpression" && node.parent.object === node && scopeManager.isContextBound(node.name);
       const isParamCall = node.parent && node.parent.type === "CallExpression" && node.parent.callee && node.parent.callee.type === "MemberExpression" && node.parent.callee.property.name === "param";
       node.parent && node.parent.type === "AssignmentExpression" && node.parent.left === node;
-      const isNamespaceFunctionArg = node.parent && node.parent.type === "CallExpression" && node.parent.callee && node.parent.callee.type === "MemberExpression" && scopeManager.isContextBound(node.parent.callee.object.name);
+      let isSeriesFunctionArg = false;
+      if (node.parent && node.parent.type === "CallExpression" && node.parent.arguments.includes(node)) {
+        const callee = node.parent.callee;
+        const isContextMethod = callee.type === "MemberExpression" && callee.object && callee.object.name === CONTEXT_NAME && ["get", "set", "init", "param"].includes(callee.property.name);
+        if (isContextMethod) {
+          const argIndex = node.parent.arguments.indexOf(node);
+          if (argIndex === 0) {
+            isSeriesFunctionArg = true;
+          }
+        } else {
+          isSeriesFunctionArg = true;
+        }
+      }
       const isArrayAccess = node.parent && node.parent.type === "MemberExpression" && node.parent.computed;
       const isArrayIndexInNamespaceCall = node.parent && node.parent.type === "MemberExpression" && node.parent.computed && node.parent.property === node && node.parent.parent && node.parent.parent.type === "CallExpression" && node.parent.parent.callee && node.parent.parent.callee.type === "MemberExpression" && scopeManager.isContextBound(node.parent.parent.callee.object.name);
       const isFunctionCall = node.parent && node.parent.type === "CallExpression" && node.parent.callee === node;
-      if (isNamespaceMember || isParamCall || isNamespaceFunctionArg || isArrayIndexInNamespaceCall || isFunctionCall) {
+      const hasArrayAccess = node.parent && node.parent.type === "MemberExpression" && node.parent.computed && node.parent.object === node;
+      if (isNamespaceMember || isParamCall || isSeriesFunctionArg || isArrayIndexInNamespaceCall || isFunctionCall) {
         if (isFunctionCall) {
+          return;
+        }
+        if (scopeManager.isLocalSeriesVar(node.name)) {
           return;
         }
         const [scopedName2, kind2] = scopeManager.getVariable(node.name);
@@ -8118,9 +8452,16 @@
         Object.assign(node, memberExpr2);
         return;
       }
+      if (scopeManager.isLocalSeriesVar(node.name)) {
+        if (!hasArrayAccess && !isArrayAccess) {
+          const memberExpr2 = ASTFactory.createIdentifier(node.name);
+          const accessExpr = ASTFactory.createGetCall(memberExpr2, 0);
+          Object.assign(node, accessExpr);
+        }
+        return;
+      }
       const [scopedName, kind] = scopeManager.getVariable(node.name);
       const memberExpr = ASTFactory.createContextVariableReference(kind, scopedName);
-      const hasArrayAccess = node.parent && node.parent.type === "MemberExpression" && node.parent.computed && node.parent.object === node;
       if (!hasArrayAccess && !isArrayAccess) {
         const accessExpr = ASTFactory.createGetCall(memberExpr, 0);
         Object.assign(node, accessExpr);
@@ -8171,6 +8512,9 @@
       if (scopeManager.isContextBound(node.name)) {
         return node;
       }
+      if (scopeManager.isLocalSeriesVar(node.name)) {
+        return node;
+      }
       const [scopedName, kind] = scopeManager.getVariable(node.name);
       return ASTFactory.createContextVariableReference(kind, scopedName);
     }
@@ -8199,6 +8543,9 @@
           return node;
         }
         const transformedObject = transformIdentifierForParam(node, scopeManager);
+        if (transformedObject.type === "Identifier" && (transformedObject.name === "NaN" || transformedObject.name === "undefined" || transformedObject.name === "Infinity" || transformedObject.name === "null" || transformedObject.name === "Math")) {
+          return transformedObject;
+        }
         return ASTFactory.createGetCall(transformedObject, 0);
       }
       case "UnaryExpression": {
@@ -8290,13 +8637,22 @@
       }
     );
     const memberExpr = ASTFactory.createMemberExpression(ASTFactory.createIdentifier(namespace), ASTFactory.createIdentifier("param"));
-    return {
+    const nextParamId = scopeManager.generateParamId();
+    const paramCall = {
       type: "CallExpression",
       callee: memberExpr,
-      arguments: [node, UNDEFINED_ARG, scopeManager.nextParamIdArg],
+      arguments: [node, UNDEFINED_ARG, { type: "Identifier", name: `'${nextParamId}'` }],
       _transformed: true,
       _isParamCall: true
     };
+    if (!scopeManager.shouldSuppressHoisting()) {
+      const tempVarName = nextParamId;
+      scopeManager.addLocalSeriesVar(tempVarName);
+      const variableDecl = ASTFactory.createVariableDeclaration(tempVarName, paramCall);
+      scopeManager.addHoistedStatement(variableDecl);
+      return ASTFactory.createIdentifier(tempVarName);
+    }
+    return paramCall;
   }
   function getParamFromUnaryExpression(node, scopeManager, namespace) {
     const transformedArgument = transformOperand(node.argument, scopeManager, namespace);
@@ -8329,13 +8685,22 @@
       const transformedObject = arg.object.type === "Identifier" && scopeManager.isContextBound(arg.object.name) && !scopeManager.isRootParam(arg.object.name) ? arg.object : transformIdentifierForParam(arg.object, scopeManager);
       const transformedProperty = arg.property.type === "Identifier" && !scopeManager.isContextBound(arg.property.name) && !scopeManager.isLoopVariable(arg.property.name) ? transformIdentifierForParam(arg.property, scopeManager) : arg.property;
       const memberExpr2 = ASTFactory.createMemberExpression(ASTFactory.createIdentifier(namespace), ASTFactory.createIdentifier("param"));
-      return {
+      const nextParamId2 = scopeManager.generateParamId();
+      const paramCall2 = {
         type: "CallExpression",
         callee: memberExpr2,
-        arguments: [transformedObject, transformedProperty, scopeManager.nextParamIdArg],
+        arguments: [transformedObject, transformedProperty, { type: "Identifier", name: `'${nextParamId2}'` }],
         _transformed: true,
         _isParamCall: true
       };
+      if (!scopeManager.shouldSuppressHoisting()) {
+        const tempVarName = nextParamId2;
+        scopeManager.addLocalSeriesVar(tempVarName);
+        const variableDecl = ASTFactory.createVariableDeclaration(tempVarName, paramCall2);
+        scopeManager.addHoistedStatement(variableDecl);
+        return ASTFactory.createIdentifier(tempVarName);
+      }
+      return paramCall2;
     }
     if (arg.type === "ObjectExpression") {
       arg.properties = arg.properties.map((prop) => {
@@ -8364,26 +8729,45 @@
       }
       if (scopeManager.isContextBound(arg.name) && !scopeManager.isRootParam(arg.name)) {
         const memberExpr2 = ASTFactory.createMemberExpression(ASTFactory.createIdentifier(namespace), ASTFactory.createIdentifier("param"));
-        return {
+        const nextParamId2 = scopeManager.generateParamId();
+        const paramCall2 = {
           type: "CallExpression",
           callee: memberExpr2,
-          arguments: [arg, UNDEFINED_ARG, scopeManager.nextParamIdArg],
+          arguments: [arg, UNDEFINED_ARG, { type: "Identifier", name: `'${nextParamId2}'` }],
           _transformed: true,
           _isParamCall: true
         };
+        if (!scopeManager.shouldSuppressHoisting()) {
+          const tempVarName = nextParamId2;
+          scopeManager.addLocalSeriesVar(tempVarName);
+          const variableDecl = ASTFactory.createVariableDeclaration(tempVarName, paramCall2);
+          scopeManager.addHoistedStatement(variableDecl);
+          return ASTFactory.createIdentifier(tempVarName);
+        }
+        return paramCall2;
       }
     }
     if (arg?.type === "CallExpression") {
       transformCallExpression(arg, scopeManager);
     }
     const memberExpr = ASTFactory.createMemberExpression(ASTFactory.createIdentifier(namespace), ASTFactory.createIdentifier("param"));
-    return {
+    const transformedArg = arg.type === "Identifier" ? transformIdentifierForParam(arg, scopeManager) : arg;
+    const nextParamId = scopeManager.generateParamId();
+    const paramCall = {
       type: "CallExpression",
       callee: memberExpr,
-      arguments: [arg.type === "Identifier" ? transformIdentifierForParam(arg, scopeManager) : arg, UNDEFINED_ARG, scopeManager.nextParamIdArg],
+      arguments: [transformedArg, UNDEFINED_ARG, { type: "Identifier", name: `'${nextParamId}'` }],
       _transformed: true,
       _isParamCall: true
     };
+    if (!scopeManager.shouldSuppressHoisting()) {
+      const tempVarName = nextParamId;
+      scopeManager.addLocalSeriesVar(tempVarName);
+      const variableDecl = ASTFactory.createVariableDeclaration(tempVarName, paramCall);
+      scopeManager.addHoistedStatement(variableDecl);
+      return ASTFactory.createIdentifier(tempVarName);
+    }
+    return paramCall;
   }
   function transformCallExpression(node, scopeManager, namespace) {
     if (node._transformed) {
@@ -8395,14 +8779,25 @@
         return;
       }
       const namespace2 = node.callee.object.name;
-      node.arguments = node.arguments.map((arg) => {
+      const newArgs = [];
+      node.arguments.forEach((arg) => {
         if (arg._isParamCall) {
-          return arg;
+          newArgs.push(arg);
+          return;
         }
-        return transformFunctionArgument(arg, namespace2, scopeManager);
+        newArgs.push(transformFunctionArgument(arg, namespace2, scopeManager));
       });
+      node.arguments = newArgs;
       if (namespace2 === "ta") {
         node.arguments.push(scopeManager.getNextTACallId());
+      }
+      if (!scopeManager.shouldSuppressHoisting()) {
+        const tempVarName = scopeManager.generateTempVar();
+        scopeManager.addLocalSeriesVar(tempVarName);
+        const variableDecl = ASTFactory.createVariableDeclaration(tempVarName, Object.assign({}, node));
+        scopeManager.addHoistedStatement(variableDecl);
+        Object.assign(node, ASTFactory.createIdentifier(tempVarName));
+        return;
       }
       node._transformed = true;
     } else if (node.callee && node.callee.type === "Identifier") {
@@ -8415,35 +8810,39 @@
       node._transformed = true;
     }
     node.arguments.forEach((arg) => {
-      recursive(arg, scopeManager, {
-        Identifier(node2, state, c) {
-          node2.parent = state.parent;
-          transformIdentifier(node2, scopeManager);
-          const isBinaryOperation = node2.parent && node2.parent.type === "BinaryExpression";
-          const isConditional = node2.parent && node2.parent.type === "ConditionalExpression";
-          if (isConditional || isBinaryOperation) {
-            if (node2.type === "MemberExpression") {
-              transformArrayIndex(node2, scopeManager);
-            } else if (node2.type === "Identifier") {
-              const isGetCall = node2.parent && node2.parent.type === "CallExpression" && node2.parent.callee && node2.parent.callee.object && node2.parent.callee.object.name === CONTEXT_NAME && node2.parent.callee.property.name === "get";
-              if (!isGetCall) {
-                addArrayAccess(node2);
+      recursive(
+        arg,
+        { parent: node },
+        {
+          Identifier(node2, state, c) {
+            node2.parent = state.parent;
+            transformIdentifier(node2, scopeManager);
+            const isBinaryOperation = node2.parent && node2.parent.type === "BinaryExpression";
+            const isConditional = node2.parent && node2.parent.type === "ConditionalExpression";
+            if (isConditional || isBinaryOperation) {
+              if (node2.type === "MemberExpression") {
+                transformArrayIndex(node2, scopeManager);
+              } else if (node2.type === "Identifier") {
+                const isGetCall = node2.parent && node2.parent.type === "CallExpression" && node2.parent.callee && node2.parent.callee.object && node2.parent.callee.object.name === CONTEXT_NAME && node2.parent.callee.property.name === "get";
+                if (!isGetCall) {
+                  addArrayAccess(node2);
+                }
               }
             }
-          }
-        },
-        CallExpression(node2, state, c) {
-          if (!node2._transformed) {
-            transformCallExpression(node2, state);
-          }
-        },
-        MemberExpression(node2, state, c) {
-          transformMemberExpression(node2, "", scopeManager);
-          if (node2.object) {
-            c(node2.object, { parent: node2, inNamespaceCall: state.inNamespaceCall });
+          },
+          CallExpression(node2, state, c) {
+            if (!node2._transformed) {
+              transformCallExpression(node2, scopeManager);
+            }
+          },
+          MemberExpression(node2, state, c) {
+            transformMemberExpression(node2, "", scopeManager);
+            if (node2.object) {
+              c(node2.object, { parent: node2 });
+            }
           }
         }
-      });
+      );
     });
   }
 
@@ -8502,6 +8901,7 @@
         CallExpression(node2, state, c) {
           const isNamespaceCall = node2.callee && node2.callee.type === "MemberExpression" && node2.callee.object && node2.callee.object.type === "Identifier" && scopeManager.isContextBound(node2.callee.object.name);
           transformCallExpression(node2, scopeManager);
+          if (node2.type !== "CallExpression") return;
           node2.arguments.forEach((arg) => c(arg, { parent: node2, inNamespaceCall: isNamespaceCall || state.inNamespaceCall }));
         }
       }
@@ -8599,6 +8999,7 @@
                   }
                 });
                 transformCallExpression(node, scopeManager);
+                if (node.type !== "CallExpression") return;
                 node.arguments.forEach((arg) => c(arg, { parent: node }));
               },
               BinaryExpression(node, state, c) {
@@ -8693,6 +9094,7 @@
     });
   }
   function transformForStatement(node, scopeManager, c) {
+    scopeManager.setSuppressHoisting(true);
     if (node.init && node.init.type === "VariableDeclaration") {
       const decl = node.init.declarations[0];
       const originalName = decl.id.name;
@@ -8759,6 +9161,7 @@
         }
       });
     }
+    scopeManager.setSuppressHoisting(false);
     scopeManager.pushScope("for");
     c(node.body, scopeManager);
     scopeManager.popScope();
@@ -8898,22 +9301,66 @@
   }
 
   function transformEqualityChecks(ast) {
-    simple(ast, {
-      BinaryExpression(node) {
-        if (node.operator === "==" || node.operator === "===") {
-          const leftOperand = node.left;
-          const rightOperand = node.right;
-          const callExpr = ASTFactory.createMathEqCall(leftOperand, rightOperand);
-          callExpr._transformed = true;
-          Object.assign(node, callExpr);
+    const baseVisitor = { ...base, LineComment: () => {
+    } };
+    simple(
+      ast,
+      {
+        BinaryExpression(node) {
+          if (node.operator === "==" || node.operator === "===") {
+            const leftOperand = node.left;
+            const rightOperand = node.right;
+            const callExpr = ASTFactory.createMathEqCall(leftOperand, rightOperand);
+            callExpr._transformed = true;
+            Object.assign(node, callExpr);
+          }
+        }
+      },
+      baseVisitor
+    );
+  }
+  function runTransformationPass(ast, scopeManager, originalParamName, options = { debug: false, ln: false }, sourceLines = []) {
+    const createDebugComment = (originalNode) => {
+      if (!options.debug || !originalNode.loc || !sourceLines.length) return null;
+      const lineIndex = originalNode.loc.start.line - 1;
+      if (lineIndex >= 0 && lineIndex < sourceLines.length) {
+        const lineText = sourceLines[lineIndex].trim();
+        if (lineText) {
+          const prefix = options.ln ? ` [Line ${originalNode.loc.start.line}]` : "";
+          return {
+            type: "LineComment",
+            value: `${prefix} ${lineText}`
+          };
         }
       }
-    });
-  }
-  function runTransformationPass(ast, scopeManager, originalParamName) {
+      return null;
+    };
     recursive(ast, scopeManager, {
+      Program(node, state, c) {
+        const newBody = [];
+        node.body.forEach((stmt) => {
+          state.enterHoistingScope();
+          c(stmt, state);
+          const hoistedStmts = state.exitHoistingScope();
+          const commentNode = createDebugComment(stmt);
+          if (commentNode) newBody.push(commentNode);
+          newBody.push(...hoistedStmts);
+          newBody.push(stmt);
+        });
+        node.body = newBody;
+      },
       BlockStatement(node, state, c) {
-        node.body.forEach((stmt) => c(stmt, state));
+        const newBody = [];
+        node.body.forEach((stmt) => {
+          state.enterHoistingScope();
+          c(stmt, state);
+          const hoistedStmts = state.exitHoistingScope();
+          const commentNode = createDebugComment(stmt);
+          if (commentNode) newBody.push(commentNode);
+          newBody.push(...hoistedStmts);
+          newBody.push(stmt);
+        });
+        node.body = newBody;
       },
       ReturnStatement(node, state) {
         transformReturnStatement(node, state);
@@ -8945,20 +9392,39 @@
     });
   }
 
-  function transpile(fn) {
+  function transpile(fn, options = { debug: false, ln: false }) {
+    if (typeof options === "boolean") {
+      options = { debug: options, ln: true };
+    }
+    const { debug } = options;
     let code = typeof fn === "function" ? fn.toString() : fn;
-    const ast = parse(code.trim(), {
+    code = code.trim();
+    const sourceLines = debug ? code.split("\n") : [];
+    const ast = parse(code, {
       ecmaVersion: "latest",
-      sourceType: "module"
+      sourceType: "module",
+      locations: debug
     });
     transformNestedArrowFunctions(ast);
+    normalizeNativeImports(ast);
+    injectImplicitImports(ast);
     const scopeManager = new ScopeManager();
     preProcessContextBoundVars(ast, scopeManager);
     const originalParamName = runAnalysisPass(ast, scopeManager) || "";
-    runTransformationPass(ast, scopeManager, originalParamName);
+    runTransformationPass(ast, scopeManager, originalParamName, options, sourceLines);
     transformEqualityChecks(ast);
-    const transformedCode = generate(ast);
-    const _wraperFunction = new Function("", `return ${transformedCode}`);
+    const baseGenerator$1 = baseGenerator || GENERATOR || undefined && undefined;
+    const customGenerator = Object.assign({}, baseGenerator$1, {
+      LineComment(node, state) {
+        state.write("//" + node.value);
+      }
+    });
+    const transformedCode = generate(ast, {
+      generator: customGenerator,
+      comments: debug
+    });
+    const _wraperFunction = new Function("", `var _r = ${transformedCode}
+; return _r;`);
     return _wraperFunction(this);
   }
 
@@ -10716,7 +11182,7 @@
   var __defProp$2 = Object.defineProperty;
   var __defNormalProp$2 = (obj, key, value) => key in obj ? __defProp$2(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField$2 = (obj, key, value) => __defNormalProp$2(obj, typeof key !== "symbol" ? key + "" : key, value);
-  class Context {
+  const _Context = class _Context {
     constructor({
       marketData,
       source,
@@ -10740,13 +11206,9 @@
       __publicField$2(this, "taState", {});
       // State for incremental TA calculations
       __publicField$2(this, "NA", NaN);
-      __publicField$2(this, "math");
-      __publicField$2(this, "ta");
-      __publicField$2(this, "input");
-      __publicField$2(this, "request");
-      __publicField$2(this, "array");
-      __publicField$2(this, "core");
       __publicField$2(this, "lang");
+      // Combined namespace and core functions - the default way to access everything
+      __publicField$2(this, "pine");
       __publicField$2(this, "idx", 0);
       __publicField$2(this, "params", {});
       __publicField$2(this, "const", {});
@@ -10769,18 +11231,25 @@
       this.limit = limit;
       this.sDate = sDate;
       this.eDate = eDate;
-      this.math = new PineMath(this);
-      this.ta = new TechnicalAnalysis(this);
-      this.input = new Input(this);
-      this.request = new PineRequest(this);
-      this.array = new PineArray(this);
       const core = new Core(this);
-      this.core = {
+      const coreFunctions = {
         plotchar: core.plotchar.bind(core),
         na: core.na.bind(core),
         color: core.color,
         plot: core.plot.bind(core),
         nz: core.nz.bind(core)
+      };
+      this.pine = {
+        input: new Input(this),
+        ta: new TechnicalAnalysis(this),
+        math: new PineMath(this),
+        request: new PineRequest(this),
+        array: new PineArray(this),
+        na: coreFunctions.na,
+        plotchar: coreFunctions.plotchar,
+        color: coreFunctions.color,
+        plot: coreFunctions.plot,
+        nz: coreFunctions.nz
       };
     }
     //#region [Runtime functions] ===========================
@@ -10888,13 +11357,86 @@
         return;
       }
     }
+    //#region [Deprecated getters] ===========================
+    /**
+     * @deprecated Use context.pine.math instead. This will be removed in a future version.
+     */
+    get math() {
+      this._showDeprecationWarning("const math = context.math", "const { math, ta, input } = context.pine");
+      return this.pine.math;
+    }
+    /**
+     * @deprecated Use context.pine.ta instead. This will be removed in a future version.
+     */
+    get ta() {
+      this._showDeprecationWarning("const ta = context.ta", "const { ta, math, input } = context.pine");
+      return this.pine.ta;
+    }
+    /**
+     * @deprecated Use context.pine.input instead. This will be removed in a future version.
+     */
+    get input() {
+      this._showDeprecationWarning("const input = context.input", "const { input, math, ta } = context.pine");
+      return this.pine.input;
+    }
+    /**
+     * @deprecated Use context.pine.request instead. This will be removed in a future version.
+     */
+    get request() {
+      this._showDeprecationWarning("const request = context.request", "const { request, math, ta } = context.pine");
+      return this.pine.request;
+    }
+    /**
+     * @deprecated Use context.pine.array instead. This will be removed in a future version.
+     */
+    get array() {
+      this._showDeprecationWarning("const array = context.array", "const { array, math, ta } = context.pine");
+      return this.pine.array;
+    }
+    /**
+     * @deprecated Use context.pine.* (e.g., context.pine.na, context.pine.plot) instead. This will be removed in a future version.
+     */
+    get core() {
+      this._showDeprecationWarning("context.core.*", "context.pine (e.g., const { na, plotchar, color, plot, nz } = context.pine)");
+      return {
+        na: this.pine.na,
+        plotchar: this.pine.plotchar,
+        color: this.pine.color,
+        plot: this.pine.plot,
+        nz: this.pine.nz
+      };
+    }
+    /**
+     * Shows a deprecation warning once per property access pattern
+     */
+    _showDeprecationWarning(oldUsage, newUsage) {
+      const warningKey = `${oldUsage}->${newUsage}`;
+      if (!_Context._deprecationWarningsShown.has(warningKey)) {
+        _Context._deprecationWarningsShown.add(warningKey);
+        if (typeof window !== "undefined") {
+          console.warn(
+            "%c[WARNING]%c %s syntax is deprecated. Use %s instead. This will be removed in a future version.",
+            "color: #FFA500; font-weight: bold;",
+            "color: #FFA500;",
+            oldUsage,
+            newUsage
+          );
+        } else {
+          console.warn(
+            `\x1B[33m[WARNING] ${oldUsage} syntax is deprecated. Use ${newUsage} instead. This will be removed in a future version.\x1B[0m`
+          );
+        }
+      }
+    }
     //#endregion
-  }
+  };
+  // Track deprecation warnings to avoid spam
+  __publicField$2(_Context, "_deprecationWarningsShown", /* @__PURE__ */ new Set());
+  let Context = _Context;
 
   var __defProp$1 = Object.defineProperty;
   var __defNormalProp$1 = (obj, key, value) => key in obj ? __defProp$1(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
   var __publicField$1 = (obj, key, value) => __defNormalProp$1(obj, typeof key !== "symbol" ? key + "" : key, value);
-  const MAX_PERIODS = 5e3;
   class PineTS {
     constructor(source, tickerId, timeframe, limit, sDate, eDate) {
       this.source = source;
@@ -10925,10 +11467,14 @@
       //public fn: Function;
       __publicField$1(this, "_readyPromise", null);
       __publicField$1(this, "_ready", false);
+      __publicField$1(this, "_debugSettings", {
+        ln: false,
+        debug: false
+      });
       __publicField$1(this, "_transpiledCode", null);
       this._readyPromise = new Promise((resolve) => {
         this.loadMarketData(source, tickerId, timeframe, limit, sDate, eDate).then((data) => {
-          const marketData = data.slice(0, MAX_PERIODS);
+          const marketData = data;
           this.data = marketData;
           const _open = marketData.map((d) => d.open);
           const _close = marketData.map((d) => d.close);
@@ -10957,6 +11503,10 @@
     }
     get transpiledCode() {
       return this._transpiledCode;
+    }
+    setDebugSettings({ ln, debug }) {
+      this._debugSettings.ln = ln;
+      this._debugSettings.debug = debug;
     }
     async loadMarketData(source, tickerId, timeframe, limit, sDate, eDate) {
       if (Array.isArray(source)) {
@@ -11216,7 +11766,7 @@
      */
     _transpileCode(pineTSCode) {
       const transformer = transpile.bind(this);
-      return transformer(pineTSCode);
+      return transformer(pineTSCode, this._debugSettings);
     }
     /**
      * Execute iterations from startIdx to endIdx, updating the context
@@ -11404,7 +11954,6 @@
         const cacheParams = { tickerId, timeframe, limit, sDate, eDate };
         const cachedData = this.cacheManager.get(cacheParams);
         if (cachedData) {
-          console.log("cache hit", tickerId, timeframe, limit, sDate, eDate);
           return cachedData;
         }
         const interval = timeframe_to_binance[timeframe.toUpperCase()];
