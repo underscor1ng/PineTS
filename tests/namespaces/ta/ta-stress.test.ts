@@ -1,6 +1,6 @@
 // TA Stress Tests - Testing technical analysis functions with edge cases and extreme conditions
 import { describe, it, expect } from 'vitest';
-import { PineTS } from '../../src/PineTS.class';
+import { PineTS } from '../../../src/PineTS.class';
 import { Provider } from '@pinets/marketData/Provider.class';
 
 describe('TA Stress Tests', () => {

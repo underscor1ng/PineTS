@@ -1,1432 +1,363 @@
-# PineTS Technical Documentation
-
-## Table of Contents
-
-1. [Project Overview](#project-overview)
-2. [Core Architecture](#core-architecture)
-3. [The Transpiler Engine](#the-transpiler-engine)
-4. [Series and Time-Series Processing](#series-and-time-series-processing)
-5. [The param() Function System](#the-param-function-system)
-6. [Unique ID Generation](#unique-id-generation)
-7. [Context Management](#context-management)
-8. [Namespace System](#namespace-system)
-9. [Execution Flow](#execution-flow)
-10. [Critical Implementation Details](#critical-implementation-details)
-11. [Common Pitfalls and Best Practices](#common-pitfalls-and-best-practices)
-12. [Syntax Evolution and Deprecation](#syntax-evolution-and-deprecation)
-
----
+# PineTS - AI Agent Instructions
 
 ## Project Overview
 
-**PineTS** is a JavaScript/TypeScript library that enables the execution of Pine Script-like indicator code in a JavaScript environment. It is **not** a direct Pine Script interpreter, but rather a sophisticated runtime transpiler that converts PineTS code (which closely resembles Pine Script) into executable JavaScript that can process financial time-series data.
+**PineTS** is a JavaScript/TypeScript library that enables the execution of Pine Script-like indicator code in a JavaScript environment. It is a sophisticated runtime transpiler that converts PineTS code (which closely resembles Pine Script) into executable JavaScript for processing financial time-series data.
 
-### Key Design Goals
+### Key Characteristics
 
-1. **Pine Script Compatibility**: Mimic Pine Script v5+ behavior and semantics
-2. **Time-Series Processing**: Handle historical data with proper lookback capabilities
-3. **Runtime Transpilation**: Transform code at runtime without requiring pre-compilation
-4. **Stateful Calculations**: Support incremental technical analysis calculations
-5. **Caching & Performance**: Optimize repeated calculations through intelligent caching
+-   **Runtime Transpilation**: Transforms code at runtime without requiring pre-compilation
+-   **Pine Script v5+ Compatibility**: Mimics Pine Script behavior and semantics
+-   **Time-Series Processing**: Handles historical data with proper lookback capabilities
+-   **Stateful Calculations**: Supports incremental technical analysis calculations
+-   **Series-Based Architecture**: Everything is a time-series with forward storage and reverse access
 
----
+## Architecture Documentation
 
-## Core Architecture
+Before making changes, familiarize yourself with the architecture:
 
-PineTS follows a three-layer architecture:
+-   **[Architecture Guide](docs/architecture/index.md)**: Main architecture overview
+-   **[Transpiler](docs/architecture/transpiler/index.md)**: AST parsing, scope analysis, code transformation
+    -   [Scope Manager](docs/architecture/transpiler/scope-manager.md): Variable renaming and unique ID generation
+    -   [Transformers](docs/architecture/transpiler/transformers.md): AST transformation logic
+    -   [Real Examples](docs/architecture/transpiler/examples.md): Actual transpilation output
+-   **[Runtime](docs/architecture/runtime/index.md)**: Context, Series, and execution loop
+    -   [Context Class](docs/architecture/runtime/context.md): The global state object
+    -   [Series Class](docs/architecture/runtime/series.md): Forward storage with reverse access
+    -   [Execution Flow](docs/architecture/runtime/execution-flow.md): Run loop and pagination
+-   **[Namespaces](docs/architecture/namespaces/index.md)**: Implementation of `ta`, `math`, `request`, etc.
+    -   [Technical Analysis (ta)](docs/architecture/namespaces/ta.md)
+    -   [Math (math)](docs/architecture/namespaces/math.md)
+    -   [Array (array)](docs/architecture/namespaces/array.md)
+    -   [Request (request)](docs/architecture/namespaces/request.md)
+    -   [Input (input)](docs/architecture/namespaces/input.md)
+-   **[Debugging Guide](docs/architecture/debugging.md)**: Practical debugging techniques
+-   **[Best Practices](docs/architecture/best-practices.md)**: Common pitfalls and recommended patterns
 
-```
-┌─────────────────────────────────────────────────┐
-│          User PineTS Code (Input)              │
-│    (Looks like Pine Script, uses JS syntax)    │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│           Transpiler Layer                      │
-│  • AST Parsing (acorn)                         │
-│  • Scope Analysis                              │
-│  • Code Transformation                         │
-│  • Context Variable Management                 │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│         Runtime Execution Layer                 │
-│  • Context Object ($)                          │
-│  • Series Management                           │
-│  • Namespace Functions (ta, math, etc.)       │
-│  • State Management                            │
-└─────────────────────────────────────────────────┘
-```
+## Critical Concepts
 
-### Main Components
+### 1. Forward Storage, Reverse Access
 
-1. **PineTS Class**: Orchestrates market data loading, execution, and pagination
-2. **Context Class**: Maintains execution state, series data, and namespaces
-3. **Transpiler**: Transforms PineTS code into executable JavaScript
-4. **Namespaces**: Provide Pine Script functions (ta.ema, math.abs, etc.)
+**CRITICAL**: PineTS stores arrays in forward chronological order (oldest→newest) but provides Pine Script's reverse indexing semantics (0=current, 1=previous).
 
----
+**How it works:**
 
-## The Transpiler Engine
+-   **Internal Storage**: JavaScript arrays store data forward: `[oldest, ..., newest]`
+-   **Pine Script Syntax**: User writes `close[0]` (current) and `close[1]` (previous)
+-   **Transpiler's Job**: Converts `close[0]` → `$.get(close, 0)` which translates to `close[length-1]`
+-   **Series Class**: Wraps arrays to provide this reverse indexing automatically
 
-The transpiler is the heart of PineTS. It transforms user code to handle Pine Script's unique scoping and time-series behavior.
+**Why forward storage?**
 
-### Transpilation Pipeline
-
-```
-Input Code String/Function
-        ↓
-┌───────────────────────┐
-│  0. Wrapper Check     │
-│  • Detect if code is  │
-│    already wrapped in │
-│    a function         │
-│  • Auto-wrap unwrapped│
-│    code in (context)  │
-│    => { ... }         │
-└───────┬───────────────┘
-        ↓
-┌───────────────────────┐
-│  1. Parse to AST      │ (using acorn)
-│     (ECMAScript AST)  │
-└───────┬───────────────┘
-        ↓
-┌───────────────────────┐
-│  2. Pre-Processing    │
-│  • Transform nested   │
-│    arrow functions    │
-│  • Normalize native   │
-│    imports (aliasing) │
-│  • Inject implicit    │
-│    imports (context.*)│
-│  • Identify context-  │
-│    bound variables    │
-└───────┬───────────────┘
-        ↓
-┌───────────────────────┐
-│  3. Analysis Pass     │
-│  • Register functions │
-│  • Track parameters   │
-│  • Build scope tree   │
-│  • Destructure arrays │
-└───────┬───────────────┘
-        ↓
-┌───────────────────────┐
-│  4. Transformation    │
-│  • Variable scoping   │
-│  • Series wrapping    │
-│  • Expression Unwrapping│ (Hoisting)
-│  • param() injection  │
-│  • ID generation      │
-└───────┬───────────────┘
-        ↓
-┌───────────────────────┐
-│  5. Post-Processing   │
-│  • Transform == to    │
-│    $.math.__eq()      │
-└───────┬───────────────┘
-        ↓
-┌───────────────────────┐
-│  6. Code Generation   │ (using astring)
-│     (Final JS code)   │
-└───────────────────────┘
-```
-
-### Context Variable System
-
-One of the most critical transformations is converting all user variables to use a **context object** (represented as `$`).
-
-**Original User Code:**
+-   **Performance**: Using `.push()` to append new bars is O(1), while `.unshift()` to prepend would be O(n)
+-   **Natural order**: Matches chronological order of market data from APIs
+-   **Memory efficiency**: No need to shift all elements when adding new data
 
 ```javascript
-let ema9 = ta.ema(close, 9);
+// Internal storage (what you see in memory)
+close = [100, 101, 102, 103, 104]  // Forward: oldest to newest
+         ↑                      ↑
+      oldest                 newest
+
+// Pine Script access (what user writes)
+close[0]  // Returns 104 (current/newest)
+close[1]  // Returns 103 (previous)
+close[4]  // Returns 100 (oldest)
+
+// ❌ WRONG: Direct array access in your code
+const current = close[close.length - 1]; // Don't do this!
+
+// ✅ CORRECT: Let transpiler handle it, or use $.get() / Series
+// User writes (transpiler converts):
+const current = close[0];  // Transpiled to: $.get(close, 0)
+
+// Or in TA functions, use Series:
+const current = Series.from(close).get(0);  // Current bar
+const previous = Series.from(close).get(1); // Previous bar
 ```
 
-**Transpiled Code (Simplified):**
+**Key Point**: The transpiler automatically converts Pine Script array notation (`close[0]`) into the correct internal access pattern. You don't need to think about array indices when writing user code - just use Pine Script syntax.
 
-```javascript
-const p0 = ta.param(close, undefined, 'p0');
-const p1 = ta.param(9, undefined, 'p1');
-const temp_1 = ta.ema(p0, p1, '_ta0');
-$.let.glb1_ema9 = $.init($.let.glb1_ema9, temp_1);
-```
+### 2. Series Class
 
-#### Why This Transformation?
-
-1. **State Persistence**: Variables need to maintain their history across iterations
-2. **Series Behavior**: Every variable becomes a time-series array
-3. **Scope Isolation**: Prevents naming conflicts across different scopes
-4. **Lookback Support**: Enables `variable[1]` to access previous values
-5. **Hoisting & Unwrapping**: Complex expressions are "unwrapped" into temporary variables to ensure proper execution order and simplified debugging.
-
-### Scope Management
-
-The transpiler maintains a sophisticated scope tree. Each variable is renamed with a prefix indicating its scope:
-
--   `glb1_` - Global scope (first occurrence)
--   `fn2_` - Function scope (second function)
--   `if3_` - If statement scope (third if block)
--   `for1_` - For loop scope
-
-**Example:**
-
-```javascript
-// Original
-let x = 10;
-if (condition) {
-    let x = 20; // Different x
-}
-
-// Transpiled
-$.let.glb1_x = $.init($.let.glb1_x, 10);
-if (condition) {
-    $.let.if1_x = $.init($.let.if1_x, 20);
-}
-```
-
-This prevents scope collisions and ensures each variable is tracked independently.
-
----
-
-## Series and Time-Series Processing
-
-### The Series Class and Data Storage
-
-**Critical Concept**: PineTS uses a **Series class** to provide Pine Script-compatible array access on forward-ordered data.
-
-```
-Pine Script Perspective:
-[Bar 0, Bar 1, Bar 2, Bar 3, ..., Bar N]
-   ↑
-  Current bar (index 0)
-
-PineTS Internal Storage (Forward Order):
-[Bar 0, Bar 1, Bar 2, ..., Bar N-1, Bar N]
-   ↑                                   ↑
-  Oldest bar                     Newest bar (current)
-
-Series Access Layer:
-Series.get(0) → Bar N (most recent)
-Series.get(1) → Bar N-1 (previous)
-Series.get(n) → Bar N-n (n bars ago)
-```
-
-#### Why Forward Storage with Series Wrapper?
-
-1. **Pine Script Compatibility**: The Series class provides `series[0]` = current bar semantics
-2. **Efficient Appending**: New bars are added with `.push()` at the end
-3. **Natural Storage**: Matches chronological order of market data
-4. **Reverse Index Calculation**: `Series.get(index)` translates to `data[length - 1 - index]`
-
-### The Series Class
-
-The `Series` class is a wrapper around standard JavaScript arrays that provides Pine Script-compatible indexing:
+The `Series` class wraps arrays to provide Pine Script indexing. Always use `Series.from()` in TA functions:
 
 ```typescript
-class Series {
-    constructor(public data: any[], public offset: number = 0) {}
-
-    // Get value at Pine Script index (0 = current, 1 = previous, etc.)
-    get(index: number): any {
-        const realIndex = this.data.length - 1 - (this.offset + index);
-        if (realIndex < 0 || realIndex >= this.data.length) {
-            return NaN;
-        }
-        return this.data[realIndex];
-    }
-
-    // Set value at Pine Script index
-    set(index: number, value: any): void {
-        const realIndex = this.data.length - 1 - (this.offset + index);
-        if (realIndex >= 0 && realIndex < this.data.length) {
-            this.data[realIndex] = value;
-        }
-    }
-}
+const currentValue = Series.from(source).get(0); // Current bar
+const previousValue = Series.from(source).get(1); // Previous bar
 ```
 
-**Key Features:**
+### 3. Incremental Calculation
 
--   **Offset Support**: Enables lookback operations like `close[1]` by creating a new Series with `offset = 1`
--   **Automatic NaN**: Returns NaN for out-of-bounds access (Pine Script behavior)
--   **Forward Array**: Wraps a standard forward-ordered array
-
-### Series Initialization with $.init()
-
-Every variable assignment goes through the `$.init()` function:
-
-```javascript
-$.init(target, source, (index = 0));
-```
-
-**Purpose:**
-
--   Creates a time-series array if it doesn't exist
--   Sets the current value (last element) from the source
--   Handles Series objects and regular values
--   Returns the array for chaining
-
-**Implementation Logic:**
+TA functions MUST use incremental calculation with state, not recalculation:
 
 ```typescript
-init(trg, src: any, idx: number = 0): Series {
-    // Extract value from source
-    let value;
-    if (src instanceof Series) {
-        value = src.get(0);
-    } else if (Array.isArray(src)) {
-        // Handle 2D arrays (tuples wrapped by $.precision() or from request.security)
-        // e.g., [[a, b]] from return $.precision([[a, b]]) or request.security tuple
-        if (Array.isArray(src[0])) {
-            value = src[0];
-        } else {
-            // Flat 1D array = time-series data (forward-ordered)
-            // Extract the element at the right position
-            value = this.precision(src[src.length - 1 + idx]);
-        }
-    } else {
-        value = this.precision(src);
-    }
-
-    // If target doesn't exist, create new Series
-    if (!trg) {
-        return new Series([value]);
-    }
-
-    // If target is already a Series, update it
-    if (trg instanceof Series) {
-        trg.data[trg.data.length - 1] = value;
-        return trg;
-    }
-
-    // Legacy: if trg is an array, convert to Series
-    if (Array.isArray(trg)) {
-        trg[trg.length - 1] = value;
-        return new Series(trg);
-    }
-
-    // Default: create new Series
-    return new Series([value]);
-}
-```
-
-**Example Transformation:**
-
-```javascript
-// User writes:
-let sma20 = ta.sma(close, 20);
-
-// Transpiler generates:
-$.let.glb1_sma20 = $.init($.let.glb1_sma20, ta.sma(ta.param(close, undefined, 'p0'), ta.param(20, undefined, 'p1'), '_ta0'));
-```
-
-### Context $.get() and $.set() Methods
-
-The transpiler transforms all array access and assignments to use context methods:
-
-```typescript
-// Access a series value with Pine Script semantics
-get(source: any, index: number) {
-    if (source instanceof Series) {
-        return source.get(index);
-    }
-
-    if (Array.isArray(source)) {
-        // Forward array access: index 0 -> last element
-        const realIndex = source.length - 1 - index;
-        if (realIndex < 0 || realIndex >= source.length) {
-            return NaN;
-        }
-        return source[realIndex];
-    }
-
-    // Scalar value - return as is
-    return source;
-}
-
-// Set the current value of a series (index 0)
-set(target: any, value: any) {
-    if (target instanceof Series) {
-        target.set(0, value);
-        return;
-    }
-
-    if (Array.isArray(target)) {
-        if (target.length > 0) {
-            target[target.length - 1] = value;  // Update current (last element)
-        } else {
-            target.push(value);
-        }
-    }
-}
-```
-
-**Transpiler Transformations:**
-
-```javascript
-// User writes:
-let prev_close = close[1];
-cc = close[2];
-
-// Transpiler generates:
-$.let.glb1_prev_close = $.init($.let.glb1_prev_close, $.get(close, 1));
-$.set($.let.glb1_cc, $.get(close, 2));
-```
-
-### Series Growth (Pushing New Values)
-
-At the end of each iteration, all series grow by pushing the current value:
-
-```javascript
-// For each variable in context ['const', 'var', 'let', 'params']
-for (let ctxVarName of contextVarNames) {
-    for (let key in context[ctxVarName]) {
-        if (Array.isArray(context[ctxVarName][key])) {
-            const arr = context[ctxVarName][key];
-            const val = arr[arr.length - 1]; // Current value (last element)
-            arr.push(val); // Append to create history
-        }
-    }
-}
-```
-
-This creates the time-series behavior where `variable[1]` accesses the previous bar's value:
-
-```
-Before iteration N+1: [val0, val1, ..., valN]
-                                          ↑ current
-
-After processing N+1:  [val0, val1, ..., valN, valN+1]
-                                          ↑            ↑
-                                          [1]          [0] current
-```
-
-### Understanding Series.from() Helper
-
-Many TA functions use `Series.from()` to normalize inputs:
-
-```typescript
-static from(source: any): Series {
-    if (source instanceof Series) return source;
-    if (Array.isArray(source)) return new Series(source);
-    return new Series([source]); // Wrap scalar in array
-}
-```
-
-This allows functions to accept:
-
--   Series objects (pass through)
--   Arrays (wrap in Series)
--   Scalar values (wrap in single-element array, then Series)
-
----
-
-## The param() Function System
-
-### What is param()?
-
-The `param()` function is a **critical wrapper** that the transpiler automatically injects around all arguments passed to namespace functions.
-
-**Purpose:**
-
-1. **Normalize Arguments**: Convert both single values and series into a consistent series format
-2. **Lookback Handling**: Properly handle array access expressions like `close[1]`
-3. **Caching**: Enable efficient caching by providing unique identifiers
-4. **Type Conversion**: Handle edge cases like `na` (NaN) conversion
-
-### Namespace-Specific param() Functions
-
-Each namespace (ta, math, array, etc.) has its **own** param function:
-
--   `ta.param()` - For technical analysis functions
--   `math.param()` - For mathematical operations
--   `array.param()` - For array operations
--   `$.param()` - For general context operations
-
-**Why separate functions?**
-
--   Allows namespace-specific parameter handling
--   Enables different caching strategies per namespace
--   Provides better debugging and error tracing
-
-### param() Signature
-
-```javascript
-param(source, index, uniqueId);
-```
-
-**Parameters:**
-
-1. `source`: The value or array to wrap
-2. `index`: Lookback index (e.g., 1 for `close[1]`)
-3. `uniqueId`: Unique identifier for caching (e.g., 'p0', 'p1')
-
-### param() Implementation
-
-The param() function now returns **Series objects** instead of raw arrays:
-
-```typescript
-// Context.param() implementation
-param(source, index, name?: string) {
-    if (typeof source === 'string') return source;
-
-    // Handle Series objects
-    if (source instanceof Series) {
-        if (index) {
-            return new Series(source.data, source.offset + index);
-        }
-        return source;
-    }
-
-    // Skip non-series object types
-    if (!Array.isArray(source) && typeof source === 'object') return source;
-
-    // Initialize params array if needed
-    if (!this.params[name]) this.params[name] = [];
-
-    if (Array.isArray(source)) {
-        // Wrap array in Series with optional offset
-        return new Series(source, index || 0);
-    } else {
-        // Wrap scalar value: store in params array, then wrap in Series
-        if (this.params[name].length === 0) {
-            this.params[name].push(source);
-        } else {
-            this.params[name][this.params[name].length - 1] = source;
-        }
-        return new Series(this.params[name], 0);
-    }
-}
-```
-
-**Namespace-Specific param() implementations (ta, math) are similar:**
-
-```typescript
-// ta.param() and math.param()
-export function param(context: any) {
-    return (source: any, index: any, name?: string) => {
-        if (source instanceof Series) {
-            if (index) {
-                return new Series(source.data, source.offset + index);
-            }
-            return source;
-        }
-
-        if (!context.params[name]) context.params[name] = [];
-
-        if (Array.isArray(source)) {
-            return new Series(source, index || 0);
-        } else {
-            if (context.params[name].length === 0) {
-                context.params[name].push(source);
-            } else {
-                context.params[name][context.params[name].length - 1] = source;
-            }
-            return new Series(context.params[name], 0);
-        }
-    };
-}
-```
-
-### How Lookback Works with Series
-
-When you write `close[1]`, the transpiler transforms it to:
-
-```javascript
-ta.param(close, 1, 'p0');
-```
-
-Inside param():
-
-```javascript
-// close is [oldestValue, ..., newestValue] (forward array)
-// index is 1
-// Result: new Series(close, 1)
-//
-// When Series.get(0) is called:
-// realIndex = close.length - 1 - (offset + 0)
-// realIndex = close.length - 1 - 1 = close.length - 2
-// Returns the second-to-last element (previous bar)
-return new Series(source, index);
-```
-
-This creates a **Series wrapper with an offset**, so when the TA function accesses `series.get(0)`, it automatically gets the value from `n` bars ago.
-
----
-
-## Unique ID Generation
-
-The transpiler generates **unique identifiers** for two purposes:
-
-### 1. Parameter IDs (for param function)
-
-**Counter**: `paramIdCounter`
-
-**Format**: `'p0'`, `'p1'`, `'p2'`, ...
-
-**Purpose**:
-
--   Uniquely identify each parameter passed to namespace functions
--   Enable caching of parameter transformations
--   Track parameter lineage for debugging
-
-**Example:**
-
-```javascript
-ta.ema(close, 9);
-// Becomes:
-ta.ema(ta.param(close, undefined, 'p0'), ta.param(9, undefined, 'p1'), '_ta0');
-```
-
-### 2. TA Call IDs (for state management)
-
-**Counter**: `taCallIdCounter`
-
-**Format**: `'_ta0'`, `'_ta1'`, `'_ta2'`, ...
-
-**Purpose**:
-
--   Uniquely identify each technical analysis function call
--   Enable separate state tracking for multiple calls to the same function
--   Critical for incremental calculations
-
-**Why This Matters:**
-
-Consider this code:
-
-```javascript
-let ema1 = ta.ema(close, 9);
-let ema2 = ta.ema(close, 21);
-let ema3 = ta.ema(close, 9); // Same parameters as ema1!
-```
-
-Without unique call IDs:
-
--   `ema1` and `ema3` would share the same state (both use period 9)
--   They would return identical values (wrong!)
--   State would be corrupted
-
-With unique call IDs:
-
-```javascript
-let ema1 = ta.ema(close, 9, '_ta0'); // Own state
-let ema2 = ta.ema(close, 21, '_ta1'); // Own state
-let ema3 = ta.ema(close, 9, '_ta2'); // Own state
-```
-
-Each call maintains **independent state** even with identical parameters.
-
-### 3. Cache IDs (for optimization)
-
-**Counter**: `cacheIdCounter`
-
-**Format**: `'cache_0'`, `'cache_1'`, ...
-
-**Purpose**:
-
--   Cache complex calculations
--   Avoid redundant computations
--   Improve performance for expensive operations
-
----
-
-## Context Management
-
-The **Context** class is the runtime execution environment. It holds all state during indicator execution.
-
-### Context Structure
-
-```typescript
-class Context {
-    // Market data (forward chronological order - oldest to newest)
-    data: {
-        open: []; // Opening prices (forward array)
-        high: []; // High prices (forward array)
-        low: []; // Low prices (forward array)
-        close: []; // Closing prices (forward array)
-        volume: []; // Volume data (forward array)
-        hl2: []; // (high + low) / 2
-        hlc3: []; // (high + low + close) / 3
-        ohlc4: []; // (open + high + low + close) / 4
-        openTime: []; // Bar open timestamps
-        closeTime: []; // Bar close timestamps
-    };
-
-    // User variables by declaration type
-    const: {}; // Variables declared with const
-    let: {}; // Variables declared with let
-    var: {}; // Variables declared with var
-    params: {}; // Parameter-wrapped series
-
-    // Namespace instances
-    ta: TechnicalAnalysis;
-    math: PineMath;
-    array: PineArray;
-    input: Input;
-    request: PineRequest;
-    core: Core;
-    lang: any;
-
-    // Constants
-    NA: any = NaN;
-
-    // State management
-    taState: {}; // TA function states (for incremental calculations)
-    cache: {}; // General caching
-
-    // Execution state
-    idx: number; // Current iteration index
-    result: any; // Accumulated results
-    plots: {}; // Plot metadata
-
-    // Market data references
-    marketData: any;
-    source: IProvider | any[];
-    tickerId: string;
-    timeframe: string;
-    limit: number;
-    sDate: number;
-    eDate: number;
-    pineTSCode: Function | String;
-
-    // Runtime methods
-    init(target, source, index): any; // Initialize/update series
-    param(source, index, name): Series; // Wrap values in Series
-    get(source, index): any; // Get value from series
-    set(target, value): void; // Set current value in series
-    precision(value, decimals): number; // Round to N decimals (default 10)
-}
-```
-
-### Context Lifecycle
-
-```
-┌─────────────────────────┐
-│  1. Context Creation    │
-│  - Initialize namespaces│
-│  - Set up data arrays   │
-└──────────┬──────────────┘
-           ↓
-┌─────────────────────────┐
-│  2. Data Population     │
-│  - Load market data     │
-│  - Initialize series    │
-└──────────┬──────────────┘
-           ↓
-┌─────────────────────────┐
-│  3. Iteration Loop      │◄───┐
-│  For each bar:          │    │
-│  - Update context.idx   │    │
-│  - Push new data        │    │
-│  - Execute transpiled   │    │
-│    code                 │    │
-│  - Collect results      │    │
-│  - Grow all series      │────┘
-└──────────┬──────────────┘
-           ↓
-┌─────────────────────────┐
-│  4. Result Collection   │
-│  - Aggregate outputs    │
-│  - Return final context │
-└─────────────────────────┘
-```
-
-### State Management for TA Functions
-
-Technical analysis functions use `context.taState` to maintain incremental calculation state.
-
-**Example: EMA State**
-
-```javascript
-context.taState['_ta0'] = {
-    prevEma: 100.5, // Previous EMA value
-    initSum: 950.2, // Sum for initialization
-    initCount: 9, // Count for initialization
-};
-```
-
-This enables **incremental calculations** instead of recalculating from scratch each bar.
-
----
-
-## Namespace System
-
-Namespaces organize related functionality (similar to Pine Script's namespaces).
-
-### Namespace Structure
-
-Each namespace:
-
-1. Is instantiated with the Context
-2. Has its own `param()` function
-3. Implements Pine Script-compatible functions
-4. May have its own caching/state management
-
-### Common Namespaces
-
-#### ta (Technical Analysis)
-
--   `ta.sma()` - Simple Moving Average
--   `ta.ema()` - Exponential Moving Average
--   `ta.rsi()` - Relative Strength Index
--   `ta.atr()` - Average True Range
--   ... many more
-
-#### math (Mathematical Operations)
-
--   `math.abs()` - Absolute value
--   `math.max()` - Maximum
--   `math.min()` - Minimum
--   `math.avg()` - Average
--   `math.__eq()` - Special equality check (handles NaN)
--   ... many more
-
-#### array (Array Operations)
-
--   `array.new()` - Create new array
--   `array.push()` - Add element
--   `array.get()` - Get element
--   ... many more
-
-### Namespace Factory Pattern
-
-All namespace functions use a factory pattern:
-
-```javascript
-// Export a factory function
-export function ema(context: any) {
-    // Return the actual function
-    return (source: any, period: any, callId?: string) => {
-        // Implementation
-    };
-}
-```
-
-**Why?**
-
--   Each function closure has access to the context
--   Functions can maintain state across calls
--   Supports dependency injection for testing
-
----
-
-## Execution Flow
-
-### Complete Execution Cycle
-
-```
-1. User calls: pineTS.run(code, periods)
-   ↓
-2. PineTS.ready() - Ensure market data loaded
-   ↓
-3. Initialize Context
-   ↓
-4. Transpile user code
-   ↓
-5. For each bar (iteration i):
-   ┌─────────────────────────────────┐
-   │ a. Set context.idx = i          │
-   │ b. Push new OHLCV data          │
-   │    (data.close.push(value))     │
-   │ c. Execute transpiled function  │
-   │ d. Collect result               │
-   │ e. Grow all user variables      │
-   │    ($.let.var.push(current))    │
-   └─────────────────────────────────┘
-   ↓
-6. Return final Context with results
-```
-
-**Key Points:**
-
--   Data arrays grow with `.push()` (forward append)
--   Variables accessed via `$.get(var, index)` use Pine Script semantics
--   Each iteration processes one bar, growing all series by one element
-
-### Data Flow During Iteration
-
-```
-Iteration N (Processing Bar N):
-
-┌──────────────────────┐
-│  Market Data Arrays  │
-│  [0, 1, 2, ..., N]   │  (Forward order)
-└─────────┬────────────┘
-          │ push(value[N])
-          ▼
-┌──────────────────────┐
-│ Context.data.close   │
-│  [0, 1, ..., N]      │  (Forward order)
-└─────────┬────────────┘
-          │ Access via $.get(close, index)
-          ▼
-┌──────────────────────┐
-│  Transpiled Code     │
-│  $.get(close, 0)     │  → close[N] (current)
-│  $.get(close, 1)     │  → close[N-1] (previous)
-└─────────┬────────────┘
-          │ Results written to $.let.var
-          ▼
-┌──────────────────────┐
-│  Variable Updates    │
-│  $.set($.let.var, x) │  → var[var.length-1] = x
-└─────────┬────────────┘
-          │ push(current_value)
-          ▼
-┌──────────────────────┐
-│  Series History      │
-│  [0, 1, ..., N]      │  (Forward order)
-└──────────────────────┘
-```
-
-### Pagination Mode
-
-PineTS supports **pagination** for processing large datasets or live streaming:
-
-```javascript
-const generator = pineTS.run(code, periods, pageSize);
-
-for await (const pageContext of generator) {
-    // pageContext contains only NEW results for this page
-    console.log(pageContext.result);
-}
-```
-
-**Key Features:**
-
--   Processes data in chunks (pages)
--   Maintains state across pages
--   Supports live data streaming
--   Automatically recalculates last candle on updates (for live data)
--   Each page yields only new results, not cumulative
-
-**Live Streaming Behavior:**
-When live streaming is enabled (`eDate` undefined + provider source):
-
-1. Fetches new candles from provider starting at last candle's openTime
-2. Updates last candle if still open (same openTime)
-3. Recalculates last bar's results to reflect updated data
-4. Appends new complete candles
-5. Yields `null` when no new data is available
-
----
-
-## Critical Implementation Details
-
-### 1. Auto-Wrapping Unwrapped Code
-
-The transpiler automatically detects if the provided code is wrapped in a function. If not, it wraps it in a context arrow function before processing.
-
-**Why This Matters:**
-
-Pine Script indicators can be written in two ways:
-
-1. **Wrapped (explicit context parameter)**:
-
-```javascript
-(context) => {
-    const { close } = context.data;
-    const { ta } = context.pine;
-    let sma = ta.sma(close, 20);
-};
-```
-
-2. **Unwrapped (implicit context)**:
-
-```javascript
-const { close } = context.data;
-const { ta } = context.pine;
-let sma = ta.sma(close, 20);
-```
-
-Or even simpler (with implicit imports):
-
-```javascript
-let sma = ta.sma(close, 20);
-```
-
-**Auto-Wrapping Process:**
-
-1. The transpiler checks if the code is already a function expression/declaration
-2. If not wrapped, it automatically wraps it: `(context) => { ... }`
-3. This happens **before** AST parsing, ensuring consistent processing
-4. Combined with implicit imports, users can write minimal Pine Script-like code
-
-**Implementation:**
-
-The `wrapInContextFunction()` transformer:
-
--   Parses the code to detect if it's already a function
--   Returns code as-is if already wrapped
--   Wraps in `(context) => { ... }` if not
-
-This enables a more natural Pine Script writing experience where users don't need to worry about the JavaScript function wrapper.
-
-### 2. The Forward Array Growth Pattern
-
-Variables maintain history through appending (pushing):
-
-```javascript
-// After calculation (updates last element)
-$.set($.let.var, newValue); // Updates last element
-// Or during init: $.let.var[$.let.var.length - 1] = newValue
-
-// At end of iteration
-const arr = $.let.var;
-const val = arr[arr.length - 1]; // Get current value (last element)
-arr.push(val); // Append to create history
-```
-
-Result:
-
-```
-Before: [oldest, ..., prev1, current]  (length = N)
-                              ↑
-                              index N-1
-
-After:  [oldest, ..., prev1, current, current]  (length = N+1)
-                              ↑       ↑
-                              index   index N
-                              N-1     (new current)
-
-Access via $.get():
-  $.get(arr, 0) → arr[N]     (current)
-  $.get(arr, 1) → arr[N-1]   (previous)
-```
-
-### 3. Equality Check Transformation
-
-JavaScript's `==` and `===` don't properly handle NaN comparisons (critical in financial data).
-
-**Transformation:**
-
-```javascript
-// User writes:
-if (value == NaN) { ... }
-
-// Transpiler converts to:
-if ($.math.__eq(value, NaN)) { ... }
-```
-
-The `__eq()` function properly handles:
-
--   NaN comparisons (NaN == NaN → true in Pine Script)
--   Series comparisons
--   Type coercion edge cases
-
-### 4. Expression Hoisting & Unwrapping
-
-To ensure predictable execution order and easier debugging, the transpiler "unwraps" nested function calls and expressions into temporary variables.
-
-**Array Pattern Destructuring Example:**
-
-```javascript
-// User writes:
-let [a, b] = ta.supertrend(close, 10, 3);
-
-// Transpiler converts to:
-const p0 = ta.param(close, undefined, 'p0');
-const p1 = ta.param(10, undefined, 'p1');
-const p2 = ta.param(3, undefined, 'p2');
-const temp_1 = ta.supertrend(p0, p1, p2, '_ta0');
-
-let a = $.init($.let.glb1_a, $.get($.const.glb1_temp_1, 0)[0]);
-let b = $.init($.let.glb1_b, $.get($.const.glb1_temp_1, 0)[1]);
-```
-
-### 5. Array Expression Transformation
-
-The transpiler transforms identifiers within array expressions to ensure proper Series access.
-
-**Example:**
-
-```javascript
-// User writes (with user variables):
-const o = open;
-const c = close;
-const [res, data] = await request.security('BTCUSDC', '240', [o, c], false, false);
-
-// Transpiler converts to:
-$.const.glb1_o = $.init($.const.glb1_o, open);
-$.const.glb1_c = $.init($.const.glb1_c, close);
-const p2 = request.param([$.get($.const.glb1_o, 0), $.get($.const.glb1_c, 0)], undefined, 'p2');
-// ... rest of request.security call
-```
-
-**Direct Series Example:**
-
-```javascript
-// User writes (with direct Series):
-const [res, data] = await request.security('BTCUSDC', '240', [open, close], false, false);
-
-// Transpiler keeps Series as-is:
-const p2 = request.param([open, close], undefined, 'p2');
-// request.param() will extract values from Series internally
-```
-
-This transformation ensures that:
-
--   User variables in arrays are accessed with `$.get(variable, 0)`
--   Direct Series references (like `open`, `close`) are passed through
--   Both scalar tuples and Series tuples are handled correctly
-
-### 6. Tuple Handling in request.security
-
-The `request.security` function has special handling for tuple expressions to distinguish between tuples and time-series arrays.
-
-**request.param() Tuple Detection:**
-
-```typescript
-export function param(context: any) {
-    return (source: any, index: any, name?: string) => {
-        if (source instanceof Series) {
-            val = source.get(index || 0);
-        } else if (Array.isArray(source)) {
-            // Detect tuple vs time-series array
-            const hasOnlySeries = source.every((elem) => elem instanceof Series);
-            const hasOnlyScalars = source.every((elem) => !(elem instanceof Series) && !Array.isArray(elem));
-            const isTuple = (hasOnlySeries || hasOnlyScalars) && source.length >= 1;
-
-            if (isTuple) {
-                if (hasOnlySeries) {
-                    // Tuple of Series: extract values from each
-                    val = source.map((s: Series) => s.get(0));
-                } else {
-                    // Tuple of scalars: preserve as-is
-                    val = source;
-                }
-            } else {
-                // Time-series array
-                val = Series.from(source).get(index || 0);
-            }
-        }
-        // ... store and return
-    };
-}
-```
-
-**2D Array Convention:**
-
-`request.security` wraps tuple return values in 2D arrays to match the `$.precision()` convention:
-
-```javascript
-// In security.ts
-const value = secContext.params[_expression_name][secContextIdx];
-return Array.isArray(value) ? [value] : value; // Wrap tuple as [[a, b]]
-```
-
-This structural distinction allows `Context.init()` to recognize tuples:
-
--   **2D array** `[[a, b]]` → tuple (extract `[a, b]`)
--   **1D array** `[1, 2, 3]` → time-series (extract last element)
--   **Scalar** `42` → single value
-
-### 7. Native Symbol Normalization & na Handling
-
-**Normalization:**
-The transpiler ensures that standard Pine Script symbols (like `close`, `open`, `ta`, `math`) cannot be renamed by the user via aliasing in imports.
-`const { close: c } = context.data;` becomes `const { close } = context.data;` and all usages of `c` are replaced with `close`.
-
-**na Handling:**
-The symbol `na` is treated specially:
-
--   When used as a value: Replaced with `NaN` (e.g., `x = na` -> `x = NaN`).
--   When used as a function: Remains as a function call (e.g., `na(x)`).
-
-### 8. Nested Function Parameters
-
-Function parameters are marked as "context-bound" to prevent transformation:
-
-```javascript
-// User writes:
-const myFunc = (value) => value * 2;
-
-// Parameter 'value' is NOT transformed to $.let.value
-// It remains as 'value' for proper function behavior
-```
-
-### 9. Loop Variable Handling
-
-Loop variables receive special treatment:
-
-```javascript
-// User writes:
-for (let i = 0; i < 10; i++) {
-    sum += values[i];
-}
-
-// Loop variable 'i' is NOT transformed
-// But 'sum' and 'values' ARE transformed
-```
-
-### 10. Precision Management
-
-All numeric values are rounded to 10 decimal places (Pine Script standard):
-
-```javascript
-context.precision(value, decimals = 10) {
-    if (typeof value !== 'number' || isNaN(value)) return value;
-    return Number(value.toFixed(decimals));
-}
-```
-
----
-
-## Real Transpiler Examples
-
-These examples show actual transpiler output from the test suite:
-
-### Example 1: Basic Variable Assignment
-
-```javascript
-// Input:
-let sma = ta.sma(close, 20);
-
-// Transpiled Output:
-const { close } = $.data;
-const ta = $.ta;
-const p0 = ta.param(close, undefined, 'p0');
-const p1 = ta.param(20, undefined, 'p1');
-const temp_1 = ta.sma(p0, p1, '_ta0');
-$.let.glb1_sma = $.init($.let.glb1_sma, temp_1);
-```
-
-### Example 2: Array Access and Assignment
-
-```javascript
-// Input:
-let prev_close = close[1];
-cc = close[2];
-
-// Transpiled Output:
-const { close } = $.data;
-$.let.glb1_prev_close = $.init($.let.glb1_prev_close, $.get(close, 1));
-$.set($.let.glb1_cc, $.get(close, 2));
-```
-
-### Example 3: Binary Operations
-
-```javascript
-// Input:
-const green_candle = close > open;
-const bull_bias = ema9 > ema18;
-
-// Transpiled Output:
-const { close, open } = $.data;
-// Note: Simple binary ops might inline $.get(), but param() wrappers are still hoisted if used
-$.const.glb1_green_candle = $.init($.const.glb1_green_candle, $.get(close, 0) > $.get(open, 0));
-$.const.glb1_bull_bias = $.init($.const.glb1_bull_bias, $.get($.const.glb1_ema9, 0) > $.get($.const.glb1_ema18, 0));
-```
-
-### Example 4: Nested Function Calls
-
-```javascript
-// Input:
-let d = ta.ema(math.abs(ap - 99), 10);
-
-// Transpiled Output:
-const ta = $.ta;
-const math = $.math;
-const p0 = math.param($.get($.let.glb1_ap, 0) - 99, undefined, 'p0');
-const temp_1 = math.abs(p0, '_ta_math_0'); // (Internal ID may vary)
-const p1 = ta.param(temp_1, undefined, 'p1');
-const p2 = ta.param(10, undefined, 'p2');
-const temp_2 = ta.ema(p1, p2, '_ta0');
-
-$.let.glb1_d = $.init($.let.glb1_d, temp_2);
-```
-
-### Example 5: Scoped Variables (If Statement)
-
-```javascript
-// Input:
-let aa = 0;
-if (_cc > 1) {
-    let bb = 1;
-    aa = 1;
-}
-
-// Transpiled Output:
-$.let.glb1_aa = $.init($.let.glb1_aa, 0);
-if ($.get($.const.glb1__cc, 0) > 1) {
-    $.let.if2_bb = $.init($.let.if2_bb, 1); // Scoped to 'if2'
-    $.set($.let.glb1_aa, 1); // Updates global scope
-}
-```
-
-### Example 6: Equality Checks
-
-```javascript
-// Input:
-if (avg_len === 0) {
-    ret_val = cc[1];
-}
-
-// Transpiled Output:
-if ($.math.__eq($.get(avg_len, 0), 0)) {
-    $.set($.let.fn2_ret_val, $.get($.let.fn2_cc, 1));
-}
-```
-
-**Note:** Equality operators (`==`, `===`) are transformed to `$.math.__eq()` to handle NaN comparisons correctly.
-
----
-
-## Common Pitfalls and Best Practices
-
-### ⚠️ Pitfall 1: Confusing Storage Order vs Access Order
-
-**Problem:**
-
-```javascript
-// Thinking arrays are stored in reverse
-let lastValue = context.data.close[0]; // Actually oldest bar!
-let currentValue = context.data.close[context.data.close.length - 1]; // Current bar
-```
-
-**Solution:**
-Remember the distinction:
-
--   **Storage**: Forward order (oldest at [0], newest at [length-1])
--   **Access via $.get() or Series**: Pine Script semantics (0 = current, 1 = previous)
--   Always use `$.get(close, index)` or `Series.get(index)` for Pine Script semantics
--   Direct array access `close[i]` gives forward chronological order
-
-### ⚠️ Pitfall 2: Modifying Transpiler Without Understanding Scope
-
-**Problem:**
-Changing variable transformation logic can break scope isolation and cause variable collisions.
-
-**Solution:**
-Always test with the transpiler test suite. Understand the scope tree before modifying.
-
-### ⚠️ Pitfall 3: Not Handling NaN Properly
-
-**Problem:**
-
-```javascript
-if (value == NaN) { ... }  // Will never be true in JavaScript
-```
-
-**Solution:**
-The transpiler automatically converts == to $.math.\_\_eq(), but if you manually create code, use the function explicitly.
-
-### ⚠️ Pitfall 4: Sharing State Across Function Calls
-
-**Problem:**
-
-```javascript
-// Two calls with same parameters sharing state
-let ema1 = ta.ema(close, 9);
-let ema2 = ta.ema(close, 9); // Should be independent!
-```
-
-**Solution:**
-The transpiler automatically injects unique call IDs. Never manually remove them.
-
-### ⚠️ Pitfall 5: Not Initializing Variables with $.init()
-
-**Problem:**
-
-```javascript
-$.let.var = someValue; // Missing $.init(), won't work as series
-```
-
-**Solution:**
-Always use `$.init()` for variable assignments (transpiler handles this automatically).
-
-### ✅ Best Practice 1: Use the Transpiler
-
-Never write transpiled code manually. Always let the transpiler handle transformations.
-
-### ✅ Best Practice 2: Test with Multiple Scenarios
-
-When modifying the transpiler, test with:
-
--   Simple variable assignments
--   Complex nested expressions
--   Multiple function calls with same parameters
--   Array operations
--   Conditional logic
--   Loops
-
-### ✅ Best Practice 3: Understand the Context
-
-Before debugging, understand what the context contains at each iteration:
-
--   What's in `$.let`, `$.const`, `$.var`?
--   What's in `$.params`?
--   What state is in `context.taState`?
-
-### ✅ Best Practice 4: Respect the Scope Manager
-
-The ScopeManager tracks:
-
--   Variable scopes and renaming
--   Context-bound variables
--   Loop variables
--   Array pattern elements
--   Parameter and cache ID generation
-
-Don't bypass it or modify its state inconsistently.
-
-### ✅ Best Practice 5: Incremental TA Functions
-
-When implementing new TA functions, prefer incremental calculations over full recalculation:
-
-```typescript
-// ❌ Bad: Recalculate from scratch each time
-function sma(source: any, period: any) {
-    let sum = 0;
-    for (let i = 0; i < period; i++) {
-        sum += Series.from(source).get(i); // Expensive repeated calls
-    }
-    return sum / period;
-}
-
-// ✅ Good: Incremental with state
+// ✅ CORRECT: O(1) per bar
 export function sma(context: any) {
-    return (source: any, _period: any, _callId?: string) => {
-        const period = Series.from(_period).get(0); // Extract period value
+    return (source: any, period: any, _callId?: string) => {
         const stateKey = _callId || `sma_${period}`;
-
         if (!context.taState[stateKey]) {
             context.taState[stateKey] = { window: [], sum: 0 };
         }
-
         const state = context.taState[stateKey];
-        const current = Series.from(source).get(0); // Get current value
-
-        // Add new value
-        state.window.push(current);
-        state.sum += current;
-
-        // Remove old value if window is full
-        if (state.window.length > period) {
-            state.sum -= state.window.shift();
-        }
-
-        // Return average or NaN if not enough data
-        return state.window.length >= period ? context.precision(state.sum / period) : NaN;
+        // Update state incrementally...
     };
 }
 ```
 
-**Key Points:**
+### 4. Unique Call IDs
 
--   Use `callId` for unique state per function call
--   Extract values from Series using `.get(0)` or `Series.from()`
--   Maintain internal state (window, sum) for efficiency
--   Return NaN during initialization period (Pine Script behavior)
--   Use `context.precision()` for consistent decimal precision
+Always use `_callId` parameter to isolate state between multiple calls:
 
----
+```typescript
+export function myIndicator(context: any) {
+    return (source: any, period: any, _callId?: string) => {
+        const stateKey = _callId || `myInd_${period}`; // REQUIRED
+        // ...
+    };
+}
+```
 
-## Debugging Guide
+### 5. Tuple Returns
 
-### Viewing Transpiled Code
+Functions returning tuples MUST use double bracket convention:
+
+```typescript
+// ✅ CORRECT
+return [[value1, value2, value3]];
+
+// ❌ WRONG
+return [value1, value2, value3];
+```
+
+### 6. Precision
+
+Always use `context.precision()` for numeric outputs:
+
+```typescript
+return context.precision(result); // Rounds to 10 decimals
+```
+
+## Development Workflow
+
+### Running Tests
+
+**IMPORTANT**: Always run tests in non-interactive mode to avoid blocking:
+
+```bash
+# ✅ CORRECT: Non-interactive
+npm test -- --no-watch
+npm test -- --watchAll=false
+
+# For specific test files
+npm test -- ta.test.ts --no-watch
+
+# ❌ WRONG: Interactive mode (will block)
+npm test
+```
+
+### Adding New TA Functions
+
+1. Create implementation in `src/namespaces/ta/methods/yourfunction.ts`
+2. Follow the factory pattern with `_callId` parameter
+3. Use incremental calculation with `context.taState`
+4. Return `NaN` during initialization period
+5. Use `context.precision()` for output
+6. Add unit tests in `tests/namespaces/ta.yourfunction.test.ts`
+7. **Regenerate barrel file**: `npm run generate:ta-index`
+
+### File Structure
+
+```
+src/
+├── transpiler/           # AST parsing and transformation
+│   ├── transformers/     # Code transformers
+│   └── ScopeManager.ts   # Variable scoping
+├── namespaces/           # Pine Script namespaces
+│   ├── ta/               # Technical Analysis
+│   │   └── methods/      # Individual TA functions
+│   ├── math/             # Mathematical operations
+│   ├── array/            # Array operations
+│   ├── request/          # Multi-timeframe analysis
+│   └── input/            # User inputs
+├── Context.class.ts      # Runtime context
+├── Series.ts             # Series wrapper class
+└── PineTS.class.ts       # Main orchestrator
+
+tests/
+├── namespaces/           # Namespace tests
+└── transpiler/           # Transpiler tests
+
+docs/
+└── architecture/         # Architecture documentation
+```
+
+## Common Mistakes to Avoid
+
+### ❌ Mistake 1: Direct Array Access
+
+```javascript
+// WRONG
+const current = close[close.length - 1];
+```
+
+**Fix**: Use `$.get(close, 0)` or `Series.from(close).get(0)`
+
+### ❌ Mistake 2: Missing \_callId
+
+```javascript
+// WRONG
+export function ema(context: any) {
+    return (source: any, period: any) => {
+        const stateKey = `ema_${period}`; // Shared state!
+    };
+}
+```
+
+**Fix**: Add `_callId?: string` parameter and use it in state key
+
+### ❌ Mistake 3: Recalculating History
+
+```javascript
+// WRONG: O(n) per bar
+for (let i = 0; i < period; i++) {
+    sum += Series.from(source).get(i);
+}
+```
+
+**Fix**: Use incremental state with rolling window
+
+### ❌ Mistake 4: Not Handling NaN
+
+```javascript
+// WRONG
+state.sum += currentValue; // NaN corrupts state!
+```
+
+**Fix**: Check `isNaN(currentValue)` before updating state
+
+### ❌ Mistake 5: Forgetting Precision
+
+```javascript
+// WRONG
+return sum / period;
+```
+
+**Fix**: `return context.precision(sum / period);`
+
+### ❌ Mistake 6: Plain Tuple Return
+
+```javascript
+// WRONG
+return [macd, signal, hist];
+```
+
+**Fix**: `return [[macd, signal, hist]];`
+
+## Transpiler Rules
+
+### DO NOT modify transpiler unless absolutely necessary
+
+-   The transpiler is complex and fragile
+-   Always run full test suite after transpiler changes
+-   Understand scope management before making changes
+-   Consult [Transpiler Documentation](docs/architecture/transpiler/index.md)
+
+### Variable Transformation
+
+-   `let x = value` → `$.let.glb1_x = $.init($.let.glb1_x, value)`
+-   `x = value` → `$.set($.let.glb1_x, value)`
+-   `x[1]` → `$.get(x, 1)`
+-   `func(arg)` → `func(ns.param(arg, undefined, 'p0'), '_id')`
+
+## Testing Requirements
+
+### Unit Tests Must Include
+
+1. **Basic functionality**: Correct calculation with known inputs
+2. **Edge cases**: NaN inputs, single bar, empty data
+3. **Multiple calls**: Same parameters, different call IDs
+4. **Initialization period**: Return NaN when insufficient data
+5. **State isolation**: Independent state for different calls
+
+### Test Pattern
+
+```typescript
+it('should calculate correctly', async () => {
+    const pineTS = new PineTS(Provider.Mock, 'BTCUSDC', 'D', null, startDate, endDate);
+
+    const sourceCode = (context) => {
+        const { close } = context.data;
+        const { ta } = context.pine;
+        const result = ta.myFunc(close, 14);
+        return { result };
+    };
+
+    const { result } = await pineTS.run(sourceCode);
+    expect(result.myFunc[result.myFunc.length - 1]).toBeCloseTo(expected);
+});
+```
+
+## Code Style
+
+### TypeScript
+
+-   Use TypeScript for new code
+-   Type function signatures properly
+-   Document complex logic with comments
+
+### Naming Conventions
+
+-   TA functions: lowercase (e.g., `ema`, `sma`, `rsi`)
+-   Classes: PascalCase (e.g., `Series`, `Context`)
+-   Private methods: prefix with `_` (e.g., `_initializeState`)
+-   State keys: use `_callId` or descriptive string
+
+### Comments
+
+-   Explain WHY, not WHAT
+-   Document non-obvious behavior
+-   Add warnings for critical sections
+
+## Git Workflow
+
+### Commits
+
+-   Write clear, descriptive commit messages
+-   Reference issue numbers when applicable
+-   Keep commits focused and atomic
+
+### Branches
+
+-   Feature branches: `feature/description`
+-   Bug fixes: `fix/description`
+-   Optimizations: `optimization/description`
+
+### Pull Requests
+
+-   Include test coverage
+-   Update documentation if needed
+-   Regenerate barrel files if adding namespace methods
+-   Ensure all tests pass in non-interactive mode
+
+## Performance Considerations
+
+1. **Incremental Calculation**: O(1) per bar, not O(n)
+2. **State Management**: Store only necessary data
+3. **Series Wrapping**: Reuse Series objects when possible
+4. **Avoid Redundant Calculations**: Cache expensive operations
+
+## Debugging
+
+### Enable Debug Output
+
+```javascript
+// In TA function
+console.log(`[${_callId}] Current value:`, currentValue);
+console.log(`[${_callId}] State:`, state);
+```
+
+### View Transpiled Code
 
 ```javascript
 const transformer = transpile.bind(context);
@@ -1434,661 +365,44 @@ const transpiledFn = transformer(userCode);
 console.log(transpiledFn.toString());
 ```
 
-### Inspecting Context State
+### Check Context State
 
 ```javascript
 console.log('Variables:', context.let);
-console.log('Parameters:', context.params);
 console.log('TA State:', context.taState);
 console.log('Current Index:', context.idx);
 ```
 
-### Common Debug Patterns
-
-```javascript
-// Check series values (remember: forward storage!)
-const close = context.data.close;
-console.log('Current close:', close[close.length - 1]); // Last element = current
-console.log('Previous close:', close[close.length - 2]); // Second-to-last = previous
-
-// Using $.get() (Pine Script semantics)
-console.log('close[0]:', context.get(close, 0)); // Current
-console.log('close[1]:', context.get(close, 1)); // Previous
-
-// Check variable history (forward arrays)
-console.log('ema9 series:', context.let.glb1_ema9); // Full forward array
-console.log('ema9 current:', context.let.glb1_ema9[context.let.glb1_ema9.length - 1]);
-
-// Check parameter transformations (Series objects)
-console.log('Params:', context.params);
-
-// Check Series objects
-const series = context.ta.param(close, 1, 'test');
-console.log('Series data:', series.data); // Underlying forward array
-console.log('Series offset:', series.offset); // Offset for lookback
-console.log('Series.get(0):', series.get(0)); // Value at Pine Script index 0
-```
-
----
-
-## Architecture Diagrams
-
-### Overall Data Flow
-
-```
-┌──────────────┐
-│ Market Data  │
-│   Provider   │
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│   PineTS     │──────┐
-│    Class     │      │
-└──────┬───────┘      │
-       │              │
-       ▼              ▼
-┌──────────────┐ ┌──────────────┐
-│  Transpiler  │ │   Context    │
-└──────┬───────┘ └──────┬───────┘
-       │                │
-       └────────┬───────┘
-                ▼
-         ┌──────────────┐
-         │  Execution   │
-         │    Loop      │
-         └──────┬───────┘
-                ▼
-         ┌──────────────┐
-         │   Results    │
-         └──────────────┘
-```
-
-### Transpiler Pass Flow
-
-```
-User Code
-   ↓
-Parse (acorn) → AST
-   ↓
-Pre-Process
-   ↓
-Analysis Pass → Scope Manager
-   ↓           (Variable tracking,
-Transformation  ID generation)
-   ↓
-Post-Process
-   ↓
-Generate (astring)
-   ↓
-Executable JS
-```
-
----
-
-## Summary of Key Concepts
-
-| Concept             | Purpose                 | Critical Detail                                    |
-| ------------------- | ----------------------- | -------------------------------------------------- |
-| **Series Class**    | Pine Script indexing    | Wraps forward arrays, provides reverse indexing    |
-| **Forward Storage** | Data storage order      | Arrays stored oldest→newest, accessed via Series   |
-| **$.get()**         | Array access            | Translates Pine index to forward array index       |
-| **$.set()**         | Value assignment        | Sets current value (last element in forward array) |
-| **$.init()**        | Variable initialization | Creates/updates time-series arrays                 |
-| **param()**         | Argument wrapping       | Returns Series objects, handles lookback           |
-| **Unique IDs**      | State isolation         | Separate state for each function call              |
-| **Scope Manager**   | Variable renaming       | Prevents collisions, tracks context                |
-| **Context ($)**     | Runtime environment     | Holds all state, data, and methods                 |
-| **Array Growth**    | Series history          | Current value pushed to maintain history           |
-| **Transpiler**      | Code transformation     | AST-based, multi-pass transformation               |
-
----
-
-## Syntax Evolution and Deprecation
-
-PineTS is evolving to provide a more unified and cleaner API surface. While older syntax patterns remain supported for backward compatibility, they may trigger runtime warnings.
-
-### The Unified Namespace Pattern
-
-**✅ Recommended (New Syntax):**
-
-Destructure all Pine Script namespaces and built-in functions from `context.pine`. This creates a cleaner import section that mirrors Pine Script's unified environment.
-
-```javascript
-(context) => {
-    const { close, open, high, low, hlc3, volume } = context.data;
-    // Import everything from context.pine - unified namespace
-    const { plotchar, color, plot, na, nz, ta, math } = context.pine;
-
-    const sma = ta.sma(close, 20);
-    const abs = math.abs(sma - close);
-};
-```
-
-**Transpiled Output:**
-
-```javascript
-($) => {
-    const { close, open, high, low, hlc3, volume } = $.data;
-    const { plotchar, color, plot, na, nz, ta, math } = $.pine;
-    // ... rest of transpiled code
-};
-```
-
-**⚠️ Deprecated (Old Syntax):**
-
-Accessing namespaces directly from the context root or splitting imports between `context.core` and direct assignments is considered legacy behavior and may trigger warnings.
-
-```javascript
-(context) => {
-    const { close, open, high, low, hlc3, volume } = context.data;
-    const { plotchar, color, plot, na, nz } = context.core; // ⚠️ Legacy: context.core
-    const ta = context.ta; // ⚠️ Legacy: Direct access
-    const math = context.math; // ⚠️ Legacy: Direct access
-
-    const sma = ta.sma(close, 20);
-    const abs = math.abs(sma - close);
-};
-```
-
-**Transpiled Output:**
-
-```javascript
-($) => {
-    const { close, open, high, low, hlc3, volume } = $.data;
-    const { plotchar, color, plot, na, nz } = $.core; // ⚠️ Deprecated
-    const ta = $.ta; // ⚠️ Deprecated
-    const math = $.math; // ⚠️ Deprecated
-    // ... rest of transpiled code
-};
-```
-
-### Key Differences
-
-1. **`context.pine` vs `context.core`**: Use `context.pine` as the single source of truth for Pine Script functions and variables. The `context.core` namespace is deprecated.
-
-2. **Namespace Access**: Prefer destructuring `ta`, `math`, `array`, etc., from `context.pine` rather than accessing them directly from `context.ta`, `context.math`, etc.
-
-3. **Consistency**: The new syntax provides a single, consistent pattern that's easier to understand and maintain.
-
-### Migration Guide
-
-To migrate from old syntax to new syntax:
-
-**Before (Old Syntax):**
-
-```javascript
-(context) => {
-    const { close, open } = context.data;
-    const { plot, color } = context.core;
-    const ta = context.ta;
-    const math = context.math;
-    const array = context.array;
-
-    // Your indicator logic
-};
-```
-
-**After (New Syntax):**
-
-```javascript
-(context) => {
-    const { close, open } = context.data;
-    const { plot, color, ta, math, array } = context.pine;
-
-    // Your indicator logic (unchanged)
-};
-```
-
-### Backward Compatibility
-
--   **Old syntax still works**: Existing indicators using the old syntax will continue to function correctly.
--   **Runtime warnings**: Indicators using deprecated syntax may log warnings to help developers migrate.
--   **No breaking changes**: The transpiler handles both syntaxes identically after normalization.
--   **Gradual migration**: You can migrate indicators at your own pace.
-
-### Why the Change?
-
-1. **Simplification**: One unified namespace (`context.pine`) instead of multiple access patterns.
-2. **Clarity**: Clear distinction between market data (`context.data`) and Pine Script functions (`context.pine`).
-3. **Maintainability**: Easier to document and understand for new users.
-4. **Future-proofing**: Provides a cleaner foundation for future API enhancements.
-
----
-
-## Complete Tuple Handling Architecture
-
-This section documents the end-to-end solution for handling tuples in PineTS, which was a critical architectural improvement.
-
-### The Problem
-
-Pine Script functions can return multiple values (tuples), which need to be properly handled throughout the system:
-
-```javascript
-// Function returning tuple
-function compute() {
-    return [value1, value2];
-}
-
-// Tuple destructuring
-const [a, b] = compute();
-
-// Tuple as expression in request.security
-const [res, data] = await request.security('BTCUSDC', '240', [open, close], false, false);
-```
-
-The challenge was distinguishing between:
-
-1. **Tuples** (multiple return values): `[a, b]`
-2. **Time-series arrays** (chronological data): `[val0, val1, ..., valN]`
-
-### The Solution: Multi-Layer Approach
-
-#### Layer 1: Transpiler Array Expression Handling
-
-The transpiler transforms array expressions containing user variables:
-
-```javascript
-// User code:
-const o = open;
-const c = close;
-const [res, data] = await request.security('BTCUSDC', '240', [o, c], false, false);
-
-// Transpiled:
-const p2 = request.param([$.get($.const.glb1_o, 0), $.get($.const.glb1_c, 0)], undefined, 'p2');
-```
-
-**Implementation** (`src/transpiler/transformers/ExpressionTransformer.ts`):
-
-```typescript
-case 'ArrayExpression':
-    // Transform each element in the array
-    arg.elements = arg.elements.map((element: any) => {
-        if (element.type === 'Identifier') {
-            if (scopeManager.isContextBound(element.name) && !scopeManager.isRootParam(element.name)) {
-                // Data variable (open, close) - use directly
-                return element;
-            }
-            // User variable - transform to $.get(variable, 0)
-            const [scopedName, kind] = scopeManager.getVariable(element.name);
-            return ASTFactory.createContextVariableAccess0(kind, scopedName);
-        }
-        return element;
-    });
-    break;
-```
-
-#### Layer 2: request.param() Tuple Detection
-
-The `request.param()` function distinguishes tuples from time-series arrays:
-
-**Heuristics**:
-
--   **Tuple of Series**: All elements are Series objects → Extract values with `.map(s => s.get(0))`
--   **Tuple of scalars**: All elements are non-Series, non-Array → Preserve as-is
--   **Time-series**: Neither of above → Extract with `Series.from(source).get(0)`
-
-**Implementation** (`src/namespaces/request/methods/param.ts`):
-
-```typescript
-const hasOnlySeries = source.every((elem) => elem instanceof Series);
-const hasOnlyScalars = source.every((elem) => !(elem instanceof Series) && !Array.isArray(elem));
-const isTuple = (hasOnlySeries || hasOnlyScalars) && source.length >= 1;
-
-if (isTuple) {
-    if (hasOnlySeries) {
-        // [open, close] → [openVal, closeVal]
-        val = source.map((s: Series) => s.get(0));
-    } else {
-        // [$.get(o, 0), $.get(c, 0)] → preserve
-        val = source;
-    }
-}
-```
-
-#### Layer 3: 2D Array Convention
-
-`request.security` wraps tuples in 2D arrays to provide structural distinction:
-
-**Implementation** (`src/namespaces/request/methods/security.ts`):
-
-```typescript
-const value = secContext.params[_expression_name][secContextIdx];
-// Wrap tuples in 2D array: [a, b] → [[a, b]]
-return Array.isArray(value) ? [value] : value;
-```
-
-This matches the convention used by `$.precision()` for function returns:
-
-```javascript
-function foo() {
-    return $.precision([[a, b]]); // 2D array wrapping
-}
-```
-
-#### Layer 4: Context.init() Recognition
-
-`Context.init()` uses structural detection to recognize tuples:
-
-**Implementation** (`src/Context.class.ts`):
-
-```typescript
-if (Array.isArray(src)) {
-    if (Array.isArray(src[0])) {
-        // 2D array [[a, b]] → tuple
-        value = src[0]; // Extract [a, b]
-    } else {
-        // 1D array [1, 2, 3] → time-series
-        value = this.precision(src[src.length - 1 + idx]); // Extract last element
-    }
-}
-```
-
-### Complete Data Flow Example
-
-**Case 1: Tuple of User Variables**
-
-```javascript
-// User code:
-const o = open;
-const c = close;
-const [res, data] = await request.security('BTCUSDC', '240', [o, c], false, false);
-```
-
-Flow:
-
-1. Transpiler: `[o, c]` → `[$.get($.const.glb1_o, 0), $.get($.const.glb1_c, 0)]`
-2. request.param(): Detects scalar tuple → preserves `[val1, val2]`
-3. Secondary context: Stores tuple in `secContext.params`
-4. request.security(): Returns `[[val1, val2]]` (2D wrap)
-5. Context.init(): Detects 2D array → extracts `[val1, val2]`
-6. Destructuring: `$.get(temp, 0)[0]` and `$.get(temp, 0)[1]` ✅
-
-**Case 2: Tuple of Series**
-
-```javascript
-// User code:
-const [res, data] = await request.security('BTCUSDC', '240', [open, close], false, false);
-```
-
-Flow:
-
-1. Transpiler: `[open, close]` → no transformation (native symbols)
-2. request.param(): Detects Series tuple → extracts `[open.get(0), close.get(0)]`
-3. Secondary context: Stores tuple in `secContext.params`
-4. request.security(): Returns `[[val1, val2]]` (2D wrap)
-5. Context.init(): Detects 2D array → extracts `[val1, val2]`
-6. Destructuring: `$.get(temp, 0)[0]` and `$.get(temp, 0)[1]` ✅
-
-**Case 3: Function Returning Tuple**
-
-```javascript
-// User code:
-function compute() {
-    return [open - close, close - open];
-}
-const [res, data] = await request.security('BTCUSDC', '240', compute(), false, false);
-```
-
-Flow:
-
-1. Function returns: `$.precision([[a, b]])` (2D array from transpiler)
-2. request.param(): Detects 2D array → extracts `[a, b]`
-3. Secondary context: Stores tuple in `secContext.params`
-4. request.security(): Returns `[[val1, val2]]` (2D wrap)
-5. Context.init(): Detects 2D array → extracts `[val1, val2]`
-6. Destructuring: `$.get(temp, 0)[0]` and `$.get(temp, 0)[1]` ✅
-
-### Key Design Decisions
-
-1. **Structural Typing Over Heuristics**: Use 2D arrays `[[a, b]]` as a clear marker for tuples
-2. **Consistent Convention**: Both `$.precision()` and `request.security` use 2D wrapping
-3. **Series-Aware Detection**: Handle both scalar and Series tuples correctly
-4. **Minimal Changes**: Solution focused on param() and init() without changing transpiler extensively
-
-### Testing Coverage
-
-All tuple scenarios are covered by tests:
-
--   ✅ Function returning tuple
--   ✅ Tuple expression with user variables `[o, c]`
--   ✅ Tuple expression with Series `[open, close]`
--   ✅ Tuple in request.security (HTF and LTF)
--   ✅ Tuple destructuring with array patterns
-
----
-
-## request.security Infinite Recursion Prevention
-
-### The Problem
-
-The `request.security` function creates a **secondary execution context** to evaluate expressions in a different timeframe. This secondary context runs the **same user code** as the primary context, which can contain additional `request.security` calls, leading to infinite recursion.
-
-**Example of Infinite Recursion:**
-
-```javascript
-// Primary context (1h timeframe)
-const { plots } = await pineTS.run(async ($) => {
-    const { close, request, plotchar } = $.pine;
-
-    // This creates a secondary context for 4h timeframe
-    const tf_4h = await request.security('BTCUSDC', '240', close, false, false);
-
-    // Inside request.security (line 100 of security.ts):
-    const secContext = await pineTS.run(context.pineTSCode);
-    // ^^^ This runs THE SAME user code again in 4h timeframe!
-
-    // Secondary context ALSO executes request.security!
-    const tf_4h = await request.security('BTCUSDC', '240', close, false, false);
-    // ^^^ RECURSION! Creates tertiary context...
-    //     Creates quaternary context...
-    //     Creates quinary context...
-    //     STACK OVERFLOW!
-});
-```
-
-### Cache Collision Bug
-
-Additionally, there was a **cache collision bug** where multiple `request.security` calls with the same parameter position but different symbols or timeframes would share the same cache key:
-
-```javascript
-// First call - expression is 3rd param
-const tf_4h = await request.security('BTCUSDC', '240', close, false, false);
-// Cache key: 'p2' (just the parameter name!)
-
-// Second call - expression is ALSO 3rd param
-const tf_1d = await request.security('BTCUSDC', 'D', close, false, false);
-// Cache key: 'p2' (COLLISION! Reuses 4h data for 1d!)
-```
-
-This caused:
-
--   Incorrect data being returned (wrong timeframe)
--   Tests hanging (attempting to create infinite contexts)
--   Memory exhaustion
-
-### The Solution: Two-Part Fix
-
-#### Part 1: Unique Cache Keys
-
-The cache key must include **symbol, timeframe, AND expression name** to be unique:
-
-**Implementation** (`src/namespaces/request/methods/security.ts`):
-
-```typescript
-// OLD (buggy):
-const gapCacheKey = `${_expression_name}_prevIdx`;
-if (context.cache[_expression_name]) {
-    const secContext = context.cache[_expression_name];
-    // ...
-}
-
-// NEW (fixed):
-const cacheKey = `${_symbol}_${_timeframe}_${_expression_name}`;
-const gapCacheKey = `${cacheKey}_prevIdx`;
-if (context.cache[cacheKey]) {
-    const secContext = context.cache[cacheKey];
-    // ...
-}
-```
-
-This ensures:
-
--   Each symbol+timeframe+expression combination has its own cache
--   Multiple security calls don't collide
--   State is properly isolated
-
-#### Part 2: Secondary Context Flag
-
-To prevent infinite recursion, we added an `isSecondaryContext` flag that marks contexts created by `request.security`. When a secondary context encounters a `request.security` call, it **returns the expression directly** instead of creating another context.
-
-**Implementation Steps:**
-
-1. **Add flag to Context class** (`src/Context.class.ts`):
-
-```typescript
-export class Context {
-    // ... existing properties
-    public isSecondaryContext: boolean = false; // Prevent infinite recursion
-    // ...
-}
-```
-
-2. **Add marking method to PineTS** (`src/PineTS.class.ts`):
-
-```typescript
-private _isSecondaryContext: boolean = false;
-public markAsSecondary() {
-    this._isSecondaryContext = true;
-}
-```
-
-3. **Pass flag during initialization** (`src/PineTS.class.ts`):
-
-```typescript
-private _initializeContext(pineTSCode: Function | String, isSecondary: boolean = false): Context {
-    const context = new Context({...});
-    context.isSecondaryContext = isSecondary; // Set the flag
-    // ...
-    return context;
-}
-
-private async _runComplete(pineTSCode: Function | String, periods?: number): Promise<Context> {
-    // ...
-    const context = this._initializeContext(pineTSCode, this._isSecondaryContext);
-    // ...
-}
-```
-
-4. **Mark secondary contexts in security.ts**:
-
-```typescript
-// When creating a secondary context for different timeframe
-const pineTS = new PineTS(context.source, _symbol, _timeframe, limit, adjustedSDate, undefined);
-
-// Mark as secondary BEFORE running!
-pineTS.markAsSecondary();
-
-const secContext = await pineTS.run(context.pineTSCode);
-```
-
-5. **Early return in secondary contexts** (`src/namespaces/request/methods/security.ts`):
-
-```typescript
-export function security(context: any) {
-    return async (...args) => {
-        const _expression = expression[0];
-
-        // CRITICAL: Prevent infinite recursion
-        // If this is a secondary context, just return the expression
-        if (context.isSecondaryContext) {
-            return _expression;
-        }
-
-        // ... normal security logic for primary context
-    };
-}
-```
-
-### Execution Flow
-
-**Primary Context (User's 1h chart):**
-
-```
-1. User code: tf_4h = await request.security('BTCUSDC', '240', close, false, false);
-2. Check cache: cacheKey = "BTCUSDC_240_p2" (not found)
-3. Create secondary PineTS for 4h
-4. Mark it as secondary: pineTS.markAsSecondary()
-5. Run user code in 4h context: secContext = await pineTS.run(...)
-```
-
-**Secondary Context (4h timeframe):**
-
-```
-1. User code executes in 4h context
-2. Encounters: tf_4h = await request.security('BTCUSDC', '240', close, false, false);
-3. Check: context.isSecondaryContext === true
-4. Early return: return _expression (close value at 4h)
-5. No tertiary context created! ✅
-```
-
-**Back to Primary Context:**
-
-```
-6. Secondary context completes without recursion
-7. Cache result: context.cache["BTCUSDC_240_p2"] = secContext
-8. Extract value from secContext and return
-9. Future calls use cached result
-```
-
-### Why This Works
-
-1. **Prevents Recursion**: Secondary contexts never create tertiary contexts
-2. **Preserves Functionality**: Expressions still evaluate correctly in secondary contexts
-3. **Maintains Cache**: Each symbol+timeframe combo is cached independently
-4. **No Performance Impact**: Flag check is O(1) at the start of the function
-
-### Testing Coverage
-
-All scenarios are covered by `tests/namespaces/request-edge-cases.test.ts`:
-
--   ✅ Multiple different timeframes (4h, 1d, 1w) without hanging
--   ✅ Multiple expressions on same timeframe
--   ✅ Independent state for different security calls
--   ✅ Complex expressions (ternary, arithmetic, nested TA)
--   ✅ Tuple returns
--   ✅ Lookahead and gaps parameters
-
-### Key Takeaways
-
-1. **Cache keys must be unique**: Include all dimensions that distinguish calls
-2. **Recursive execution needs guards**: Flag secondary contexts to prevent infinite loops
-3. **Test edge cases**: Multiple calls, nested calls, and state independence
-4. **Document architectural decisions**: This was a critical bug that could reoccur if the pattern isn't understood
-
----
-
-## Conclusion
-
-PineTS is a sophisticated system that bridges Pine Script semantics with JavaScript execution. The key to understanding and maintaining it is recognizing:
-
-1. **Series-based architecture** - The Series class provides Pine Script indexing on forward-ordered arrays
-2. **Forward storage, reverse access** - Data stored oldest→newest, accessed via Series with Pine Script semantics
-3. **Dual access methods** - `$.get()/$.set()` for Pine Script semantics, direct array access for chronological order
-4. **State isolation** - Unique IDs ensure independent state for each function call
-5. **Context-driven execution** - The $ object is the central nervous system
-6. **Incremental calculations** - TA functions maintain state for efficiency
-7. **param() returns Series** - All namespace functions receive and return Series objects
-8. **Secondary context prevention** - request.security uses flags to prevent infinite recursion
-
-When modifying PineTS:
-
--   Understand the Series class and its role in bridging storage and access semantics
--   Understand the transpilation pipeline and how it transforms array access
--   Respect the scope manager and variable transformation rules
--   Maintain the series paradigm (forward storage, Series-based access)
--   Test thoroughly with edge cases, especially array indexing
--   Document any new transformations or Series-related changes
--   Be aware of recursive execution patterns and guard against them
-
-This architecture enables running thousands of Pine Script indicators in JavaScript with high fidelity and performance while maintaining compatibility with Pine Script's unique time-series semantics.
+See [Debugging Guide](docs/architecture/debugging.md) for more techniques.
+
+## Resources
+
+-   **Architecture**: [docs/architecture/](docs/architecture/)
+-   **API Coverage**: [docs/api-coverage/](docs/api-coverage/)
+-   **Examples**: [docs/architecture/transpiler/examples.md](docs/architecture/transpiler/examples.md)
+-   **Best Practices**: [docs/architecture/best-practices.md](docs/architecture/best-practices.md)
+
+## Questions?
+
+When in doubt:
+
+1. Read the [Architecture Guide](docs/architecture/index.md)
+2. Check [Best Practices](docs/architecture/best-practices.md)
+3. Look at existing implementations in `src/namespaces/ta/methods/`
+4. Run tests in non-interactive mode: `npm test -- --no-watch`
+
+## Summary
+
+**Key Takeaways for AI Agents:**
+
+-   ✅ Forward storage, reverse access (use `$.get()` or `Series`)
+-   ✅ Incremental calculation with state (not recalculation)
+-   ✅ Always use `_callId` parameter for state isolation
+-   ✅ Return tuples as `[[...]]` (double brackets)
+-   ✅ Use `context.precision()` for numeric outputs
+-   ✅ Handle NaN inputs gracefully
+-   ✅ Run tests with `--no-watch` flag
+-   ✅ Regenerate barrel files after adding methods
+-   ❌ Don't modify transpiler without deep understanding
+-   ❌ Don't use direct array access for time-series data
+-   ❌ Don't share state between function calls
