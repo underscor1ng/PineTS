@@ -18,7 +18,7 @@ export function valuewhen(context: any) {
             };
         }
         const state = context.taState[stateKey];
-        
+
         const cond = Series.from(condition).get(0);
         const val = Series.from(source).get(0);
         const occurrence = Series.from(_occurrence).get(0);
@@ -32,13 +32,13 @@ export function valuewhen(context: any) {
         }
 
         const index = state.values.length - 1 - occurrence;
-        
+
         if (index < 0) {
             return NaN;
         }
 
         const result = state.values[index];
-        
+
         // Check if result is a number to apply precision, else return as is (e.g. boolean/color)
         if (typeof result === 'number') {
             return context.precision(result);
@@ -46,4 +46,3 @@ export function valuewhen(context: any) {
         return result;
     };
 }
-

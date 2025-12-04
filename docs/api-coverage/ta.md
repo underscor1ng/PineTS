@@ -108,7 +108,7 @@ All functions listed below are verified to exist in Pine Script v5.
 
 | Function         | Status | Description              |
 | ---------------- | ------ | ------------------------ |
-| `ta.valuewhen()` | ⬜     | Value When Condition Met |
+| `ta.valuewhen()` | ✅     | Value When Condition Met |
 | `ta.barssince()` | ✅     | Bars Since Condition     |
 | `ta.cum()`       | ✅     | Cumulative Sum           |
 
