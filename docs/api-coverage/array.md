@@ -43,9 +43,9 @@ parent: API Coverage
 | `array.get()`   | ✅     | Get value at index    |
 | `array.set()`   | ✅     | Set value at index    |
 | `array.first()` | ✅     | Get first element     |
-| `array.last()`  | ✔️     | Get last element      |
+| `array.last()`  | ✅     | Get last element      |
 | `array.fill()`  | ✔️     | Fill array with value |
-| `array.size()`  | ✔️     | Get array size        |
+| `array.size()`  | ✅     | Get array size        |
 
 ### Search & Lookup
 
@@ -82,11 +82,11 @@ parent: API Coverage
 
 | Function               | Status | Description                  |
 | ---------------------- | ------ | ---------------------------- |
-| `array.concat()`       | ✔️     | Concatenate arrays           |
-| `array.slice()`        | ✔️     | Extract subarray             |
-| `array.reverse()`      | ✔️     | Reverse order                |
-| `array.sort()`         | ✔️     | Sort array                   |
-| `array.sort_indices()` | ✔️     | Get sorted indices           |
-| `array.join()`         | ✔️     | Join to string               |
-| `array.every()`        | ✔️     | Check if all elements match  |
-| `array.some()`         | ✔️     | Check if any element matches |
+| `array.concat()`       | ✅     | Concatenate arrays           |
+| `array.slice()`        | ✅     | Extract subarray             |
+| `array.reverse()`      | ✅     | Reverse order                |
+| `array.sort()`         | ✅     | Sort array                   |
+| `array.sort_indices()` | ✅     | Get sorted indices           |
+| `array.join()`         | ✅     | Join to string               |
+| `array.every()`        | ✅     | Check if all elements match  |
+| `array.some()`         | ✅     | Check if any element matches |
