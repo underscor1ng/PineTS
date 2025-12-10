@@ -152,7 +152,7 @@ export class PineArrayObject {
     }
 
     toString(): string {
-        return 'PineArrayObject:' + this.array.toString();
+        return '[' + this.array.toString().replace(/,/g, ', ') + ']';
     }
 
     abs(...args: any[]) {

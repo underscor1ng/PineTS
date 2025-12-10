@@ -1,3 +1,5 @@
+import { PineMatrixObject } from '../PineMatrixObject';
+import { Context } from '../../../Context.class';
 import { Series } from '../../../Series';
 import { PineArrayObject } from '../../array/PineArrayObject';
 

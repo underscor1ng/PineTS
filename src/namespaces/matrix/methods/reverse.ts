@@ -6,6 +6,8 @@ import { Context } from '../../../Context.class';
 export function reverse(context: Context) {
     return (id: PineMatrixObject) => {
         id.matrix.reverse();
+        for (const row of id.matrix) {
+            row.reverse();
+        }
     };
 }
-

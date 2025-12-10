@@ -22,10 +22,13 @@ export const CONTEXT_PINE_VARS = [
     'table',
     'map',
     'matrix',
-    'syminfo',
-    'barstate',
     'log',
     'map',
+
+    //market info
+    'timeframe',
+    'syminfo',
+    'barstate',
 
     //builtin variables
     'bar_index',

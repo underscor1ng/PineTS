@@ -8,10 +8,9 @@ export function copy(context: Context) {
         const rows = id.matrix.length;
         const cols = rows > 0 ? id.matrix[0].length : 0;
         const newMatrix = new PineMatrixObject(id.type, rows, cols, NaN, context);
-        
+
         // Deep copy the array of arrays structure
-        newMatrix.matrix = id.matrix.map(row => [...row]);
+        newMatrix.matrix = id.matrix.map((row) => [...row]);
         return newMatrix;
     };
 }
-

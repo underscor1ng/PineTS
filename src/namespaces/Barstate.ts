@@ -1,10 +1,12 @@
-
 import { Series } from '../Series';
 
 export class Barstate {
-
     private _live: boolean = false;
 
+    constructor(private context: any) {}
+    public setLive() {
+        this._live = true;
+    }
     public get isnew() {
         return !this._live;
     }
@@ -33,11 +35,5 @@ export class Barstate {
         //FIXME : this is a temporary solution to get the islastconfirmedhistory value,
         //we need to implement a better way to handle it based on market data
         return this.context.data.closeTime[this.context.data.closeTime.length - 1] <= new Date().getTime();
-    }        
-    
-    constructor(private context: any) {}
-
-    public setLive() {
-        this._live = true;
     }
 }

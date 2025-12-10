@@ -42,9 +42,7 @@ async function generateIndex() {
 
         const objectPrivateProps = objectMethods.map((m) => `    private _${m.classProp}: any;`).join('\n');
 
-        const objectInitProps = objectMethods
-            .map((m) => `        this._${m.classProp} = ${m.export}_factory(this.context);`)
-            .join('\n');
+        const objectInitProps = objectMethods.map((m) => `        this._${m.classProp} = ${m.export}_factory(this.context);`).join('\n');
 
         const objectMethodDefs = objectMethods
             .map((m) => {
@@ -84,7 +82,7 @@ ${objectInitProps}
     }
 
     toString(): string {
-        return 'PineArrayObject:' + this.array.toString();
+        return '[' + this.array.toString().replace(/,/g, ', ') + ']';
     }
 
 ${objectMethodDefs}

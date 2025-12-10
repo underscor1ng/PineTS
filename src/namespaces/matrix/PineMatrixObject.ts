@@ -102,13 +102,7 @@ export class PineMatrixObject {
     private _trace: any;
     private _transpose: any;
 
-    constructor(
-        public type: string,
-        rows: number = 0,
-        cols: number = 0,
-        initialValue: any = NaN,
-        public context: any
-    ) {
+    constructor(public type: string, rows: number = 0, cols: number = 0, initialValue: any = NaN, public context: any) {
         this.matrix = [];
         if (rows > 0 && cols > 0) {
             for (let i = 0; i < rows; i++) {
@@ -166,9 +160,12 @@ export class PineMatrixObject {
     }
 
     toString(): string {
-        const rows = this.matrix.length;
-        const cols = rows > 0 ? this.matrix[0].length : 0;
-        return `PineMatrixObject<${this.type}>(${rows}x${cols})`;
+        let result = '';
+        for (let i = 0; i < this.matrix.length; i++) {
+            result += result === '' ? '' : '\n';
+            result += '[' + this.matrix[i].join(', ') + ']';
+        }
+        return result;
     }
 
     add_col(...args: any[]) {

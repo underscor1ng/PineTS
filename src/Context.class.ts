@@ -15,6 +15,7 @@ import { Series } from './Series';
 import { Log } from './namespaces/Log';
 import { Str } from './namespaces/Str';
 import types from './namespaces/Types';
+import { Timeframe } from './namespaces/Timeframe';
 
 export class Context {
     public data: any = {
@@ -54,6 +55,7 @@ export class Context {
         barstate: Barstate;
         log: Log;
         str: Str;
+        timeframe: Timeframe;
         [key: string]: any;
     };
 
@@ -134,7 +136,7 @@ export class Context {
             plot: coreFunctions.plot,
             nz: coreFunctions.nz,
             syminfo: null,
-
+            timeframe: new Timeframe(this),
             //FIXME : this is a temporary solution to get the barstate values,
             //we need to implement a better way to handle realtime states
             barstate: new Barstate(this),

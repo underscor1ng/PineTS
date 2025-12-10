@@ -42,9 +42,7 @@ async function generateIndex() {
 
         const objectPrivateProps = objectMethods.map((m) => `    private _${m.classProp}: any;`).join('\n');
 
-        const objectInitProps = objectMethods
-            .map((m) => `        this._${m.classProp} = ${m.export}_factory(this.context);`)
-            .join('\n');
+        const objectInitProps = objectMethods.map((m) => `        this._${m.classProp} = ${m.export}_factory(this.context);`).join('\n');
 
         const objectMethodDefs = objectMethods
             .map((m) => {
@@ -81,9 +79,12 @@ ${objectInitProps}
     }
 
     toString(): string {
-        const rows = this.matrix.length;
-        const cols = rows > 0 ? this.matrix[0].length : 0;
-        return \`PineMatrixObject<\${this.type}>(\${rows}x\${cols})\`;
+        let result = '';
+        for (let i = 0; i < this.matrix.length; i++) {
+            result += result === '' ? '' : '\\n';
+            result += '[' + this.matrix[i].join(', ') + ']';
+        }
+        return result;
     }
 
 ${objectMethodDefs}
@@ -165,4 +166,3 @@ export default PineMatrix;
 }
 
 generateIndex();
-

@@ -27,7 +27,7 @@ export class PineMatrix {
     this.eigenvectors = (id: PineMatrixObject, ...args: any[]) => id.eigenvectors(...args);
     this.elements_count = (id: PineMatrixObject, ...args: any[]) => id.elements_count(...args);
     this.fill = (id: PineMatrixObject, ...args: any[]) => id.fill(...args);
-    this.get = (id: PineMatrixObject, ...args: any[]) => id instanceof PineMatrixObject ? id.get(...args) : NaN;
+    this.get = (id: PineMatrixObject, ...args: any[]) => id.get(...args);
     this.inv = (id: PineMatrixObject, ...args: any[]) => id.inv(...args);
     this.is_antidiagonal = (id: PineMatrixObject, ...args: any[]) => id.is_antidiagonal(...args);
     this.is_antisymmetric = (id: PineMatrixObject, ...args: any[]) => id.is_antisymmetric(...args);
