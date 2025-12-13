@@ -1,7 +1,7 @@
-async function SQZMOM(tickerId, timeframe = '1w', periods = 500, stime, etime) {
+async function indicator(tickerId, timeframe = '1w', periods = 500, stime, etime) {
     const pineTS = new PineTS(PineTS.Provider.Binance, tickerId, timeframe, periods, stime, etime);
 
-    const { result, plots } = await pineTS.run((context) => {
+    const { result, plots, marketData } = await pineTS.run((context) => {
         // This is a PineTS port of "Squeeze Momentum Indicator" indicator by LazyBear
         // List of all his indicators: https://www.tradingview.com/v/4IneGo8h/
         const { close, high, low } = context.data;
@@ -51,5 +51,5 @@ async function SQZMOM(tickerId, timeframe = '1w', periods = 500, stime, etime) {
         plot(0, 'Cross', { color: scolor, style: 'cross', linewidth: 2 });
     });
 
-    return plots;
+    return { result, plots, marketData };
 }

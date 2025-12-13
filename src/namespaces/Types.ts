@@ -72,6 +72,16 @@ export enum dayofweek {
     saturday = 7,
 }
 
+export enum display {
+    all = 'all',
+    data_window = 'data_window',
+    none = 'none',
+    pane = 'pane',
+    pine_screener = 'pine_screener',
+    price_scale = 'price_scale',
+    status_line = 'status_line',
+}
+
 const types = {
     order,
     currency,

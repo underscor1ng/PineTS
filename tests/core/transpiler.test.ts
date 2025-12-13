@@ -50,38 +50,42 @@ describe('Transpiler', () => {
         expect(result).toBe(expected_code);
     });
 
-
     it('Native Data', async () => {
-      const fakeContext = {};
-      const transformer = transpile.bind(fakeContext);
+        const fakeContext = {};
+        const transformer = transpile.bind(fakeContext);
 
-      const source = (context) => {
-          const { close, open, high, low, hlc3, volume } = context.data;
-          const { plotchar, color, plot, na, nz } = context.core;
+        const source = (context) => {
+            const { close, open, high, low, hlc3, volume } = context.data;
+            const { plotchar, color, plot, na, nz } = context.core;
 
-          const ta = context.ta;
-          const math = context.math;
+            const ta = context.ta;
+            const math = context.math;
 
-          let lowest_signaled_price = nz(open, na);
-          let n_a = na;
-          if (na(n_a)) {
-              n_a = close;
-          }
+            let lowest_signaled_price = nz(open, na);
+            let n_a = na;
+            if (na(n_a)) {
+                n_a = close;
+            }
 
-          return {
-            open, close, high, low, hlc3, volume,
-            lowest_signaled_price,
-            n_a,
-          }
-      };
+            return {
+                open,
+                close,
+                high,
+                low,
+                hlc3,
+                volume,
+                lowest_signaled_price,
+                n_a,
+            };
+        };
 
-      let transpiled = transformer(source);
+        let transpiled = transformer(source);
 
-      console.log(transpiled.toString());
-      const result = transpiled.toString().trim();
+        console.log(transpiled.toString());
+        const result = transpiled.toString().trim();
 
-      /* prettier-ignore */
-      const expected_code = `$ => {
+        /* prettier-ignore */
+        const expected_code = `$ => {
   const {close, open, high, low, hlc3, volume} = $.data;
   const {plotchar, color, plot, na, nz} = $.core;
   const ta = $.ta;
@@ -105,8 +109,8 @@ describe('Transpiler', () => {
   };
 }`;
 
-      expect(result).toBe(expected_code);
-  });    
+        expect(result).toBe(expected_code);
+    });
 
     it('Unwrapped PineTS Code', async () => {
         const fakeContext = {};
@@ -142,6 +146,69 @@ if (na(n_a)) {
   if (na(p1)) {
     $.set($.let.glb1_n_a, $.get(close, 0));
   }
+}`;
+
+        expect(result).toBe(expected_code);
+    });
+
+    it('Inputs', async () => {
+        const fakeContext = {};
+        const transformer = transpile.bind(fakeContext);
+
+        // we expect the transpiler to wrap the code in a context function and add missing namespaces
+        const source = `
+let _int = input.int({title: 'Fast Length', defval: 12});
+
+let _string = input.string({title: 'String Input', defval: "Hello"});
+let _float = input.float(10.0, "float input", {minval: 0.0, maxval: 100.0, step: 0.1});
+
+let src_close = input({ title: 'Close Source', defval: close });
+
+let src_open = input.any({ title: 'Open Source', defval: open });
+      `;
+
+        let transpiled = transformer(source);
+
+        console.log(transpiled.toString());
+        const result = transpiled.toString().trim();
+
+        /* prettier-ignore */
+        const expected_code = `$ => {
+  const {open, close} = $.data;
+  const {input} = $.pine;
+  const p0 = input.param({
+    title: 'Fast Length',
+    defval: 12
+  }, undefined, 'p0');
+  const temp_1 = input.int(p0);
+  $.let.glb1__int = $.init($.let.glb1__int, temp_1);
+  const p1 = input.param({
+    title: 'String Input',
+    defval: "Hello"
+  }, undefined, 'p1');
+  const temp_2 = input.string(p1);
+  $.let.glb1__string = $.init($.let.glb1__string, temp_2);
+  const p2 = input.param(10.0, undefined, 'p2');
+  const p3 = input.param("float input", undefined, 'p3');
+  const p4 = input.param({
+    minval: 0.0,
+    maxval: 100.0,
+    step: 0.1
+  }, undefined, 'p4');
+  const temp_3 = input.float(p2, p3, p4);
+  $.let.glb1__float = $.init($.let.glb1__float, temp_3);
+  const p5 = input.param({
+    title: 'Close Source',
+    defval: close
+  }, undefined, 'p5');
+  const temp_4 = input.any(p5);
+  $.let.glb1_src_close = $.init($.let.glb1_src_close, temp_4);
+  const p6 = input.param({
+    title: 'Open Source',
+    defval: open
+  }, undefined, 'p6');
+  const temp_5 = input.any(p6);
+  $.let.glb1_src_open = $.init($.let.glb1_src_open, temp_5);
 }`;
 
         expect(result).toBe(expected_code);

@@ -9,7 +9,7 @@
         "high": true,
         "hl2": true,
         "hlc3": true,
-        "hlcc4": false,
+        "hlcc4": true,
         "hour": false,
         "last_bar_index": true,
         "last_bar_time": true,

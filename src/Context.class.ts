@@ -27,6 +27,7 @@ export class Context {
         hl2: new Series([]),
         hlc3: new Series([]),
         ohlc4: new Series([]),
+        hlcc4: new Series([]),
     };
     public cache: any = {};
     public taState: any = {}; // State for incremental TA calculations

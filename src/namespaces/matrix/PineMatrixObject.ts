@@ -102,7 +102,13 @@ export class PineMatrixObject {
     private _trace: any;
     private _transpose: any;
 
-    constructor(public type: string, rows: number = 0, cols: number = 0, initialValue: any = NaN, public context: any) {
+    constructor(
+        public type: string,
+        rows: number = 0,
+        cols: number = 0,
+        initialValue: any = NaN,
+        public context: any
+    ) {
         this.matrix = [];
         if (rows > 0 && cols > 0) {
             for (let i = 0; i < rows; i++) {

@@ -1,3 +1,6 @@
+// Known Pine Script namespaces that might be used as functions or objects
+export const KNOWN_NAMESPACES = ['ta', 'math', 'request', 'array', 'input'];
+
 // All known data variables in the context
 export const CONTEXT_DATA_VARS = ['open', 'high', 'low', 'close', 'volume', 'hl2', 'hlc3', 'ohlc4', 'openTime', 'closeTime'];
 
@@ -38,6 +41,8 @@ export const CONTEXT_PINE_VARS = [
     // Pine Script enum types
     'order',
     'currency',
+    'display',
+    'dayofweek',
 ];
 
 // All known core variables in the context

@@ -120,16 +120,6 @@ export function injectImplicitImports(ast: any): void {
     const missingDataVars = contextDataVars.filter((v) => !declaredVars.has(v));
     const missingPineVars = contextPineVars.filter((v) => !declaredVars.has(v));
 
-    // We could filter by usage (usedIdentifiers.has(v)), but implicit injection usually makes them available regardless.
-    // However, to avoid clutter and potential conflicts (though we checked declarations),
-    // checking usage is safer and cleaner.
-    // User requested: "if anything is missing ... inject it".
-    // If I inject unused vars, typescript/linter might complain, but this is transpiled code.
-    // But wait, if I inject `const { open } = context.data`, and `open` is NOT used, is it a problem?
-    // No.
-    // But if the user meant "inject if I use it but forgot to import", that's safer.
-    // Let's check usages.
-
     const neededDataVars = missingDataVars.filter((v) => usedIdentifiers.has(v));
     const neededPineVars = missingPineVars.filter((v) => usedIdentifiers.has(v));
 

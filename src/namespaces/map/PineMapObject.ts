@@ -26,7 +26,11 @@ export class PineMapObject {
     private _size: any;
     private _values: any;
 
-    constructor(public keyType: string, public valueType: string, public context: any) {
+    constructor(
+        public keyType: string,
+        public valueType: string,
+        public context: any
+    ) {
         this.map = new Map();
         this._clear = clear_factory(this.context);
         this._contains = contains_factory(this.context);

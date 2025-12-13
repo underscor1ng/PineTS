@@ -4,6 +4,7 @@
 import * as walk from 'acorn-walk';
 import ScopeManager from '../analysis/ScopeManager';
 import { ASTFactory, CONTEXT_NAME } from '../utils/ASTFactory';
+import { KNOWN_NAMESPACES } from '../settings';
 
 const UNDEFINED_ARG = {
     type: 'Identifier',
@@ -123,7 +124,6 @@ export function transformIdentifier(node: any, scopeManager: ScopeManager): void
             } else {
                 // For all other functions (including namespace and user-defined), pass Series
                 // UNLESS it is a method call on a variable that is NOT a known namespace
-                const KNOWN_NAMESPACES = ['ta', 'math', 'request', 'array', 'input'];
                 const isNamespaceCall =
                     callee.type === 'MemberExpression' &&
                     callee.object &&
@@ -241,7 +241,6 @@ export function transformIdentifier(node: any, scopeManager: ScopeManager): void
 }
 
 export function transformMemberExpression(memberNode: any, originalParamName: string, scopeManager: ScopeManager): void {
-    // ... (rest is same, I will append it below)
     // Skip transformation for Math object properties
     if (memberNode.object && memberNode.object.type === 'Identifier' && memberNode.object.name === 'Math') {
         return;
@@ -250,7 +249,6 @@ export function transformMemberExpression(memberNode: any, originalParamName: st
     // Check if this is a direct namespace method access without parentheses (e.g., ta.tr, math.pi)
     // Only apply to known Pine Script namespaces: ta, math, request, array, input
     // If so, convert it to a call expression (e.g., ta.tr(), math.pi())
-    const KNOWN_NAMESPACES = ['ta', 'math', 'request', 'array', 'input'];
     const isDirectNamespaceMemberAccess =
         memberNode.object &&
         memberNode.object.type === 'Identifier' &&
@@ -717,6 +715,22 @@ export function transformFunctionArgument(arg: any, namespace: string, scopeMana
         arg.properties = arg.properties.map((prop: any) => {
             // Get the variable name and kind
             if (prop.value.name) {
+                // If it's a context-bound variable (like 'close', 'open') and not a root param
+                if (scopeManager.isContextBound(prop.value.name) && !scopeManager.isRootParam(prop.value.name)) {
+                    return {
+                        type: 'Property',
+                        key: {
+                            type: 'Identifier',
+                            name: prop.key.name,
+                        },
+                        value: ASTFactory.createIdentifier(prop.value.name),
+                        kind: 'init',
+                        method: false,
+                        shorthand: false,
+                        computed: false,
+                    };
+                }
+
                 const [scopedName, kind] = scopeManager.getVariable(prop.value.name);
 
                 // Convert shorthand to full property definition
@@ -731,7 +745,6 @@ export function transformFunctionArgument(arg: any, namespace: string, scopeMana
                     method: false,
                     shorthand: false,
                     computed: false,
-                    type: 'Property',
                 };
             }
             return prop;
@@ -801,6 +814,18 @@ export function transformCallExpression(node: any, scopeManager: ScopeManager, n
     // Skip if this node has already been transformed
     if (node._transformed) {
         return;
+    }
+
+    // Check if this is a direct call to a known namespace (e.g. input(...))
+    if (
+        node.callee &&
+        node.callee.type === 'Identifier' &&
+        KNOWN_NAMESPACES.includes(node.callee.name) &&
+        scopeManager.isContextBound(node.callee.name)
+    ) {
+        // Transform to namespace.any(...)
+        node.callee = ASTFactory.createMemberExpression(node.callee, ASTFactory.createIdentifier('any'));
+        // Continue processing to handle arguments transformation
     }
 
     // Check if this is a namespace method call (e.g., ta.ema, math.abs)

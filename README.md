@@ -6,6 +6,15 @@
 
 ---
 
+This project aims to provide a Javascript/Typescript port for Tradingview's Pine Script.
+The current version does not run Pine Script directly, instead it runs a close Javascript equivalent called PineTS.
+
+PineTS makes it possible to migrate Pine Script v5+ indicators to Javascript/Typescript, in order to run them in a Javascript environment.
+
+> _Disclaimer : PineTS is an independent project and is not affiliated with, endorsed by, or associated with TradingView or Pine Script™. All trademarks and registered trademarks mentioned belong to their respective owners._
+
+---
+
 ## Pine Script API Coverage
 
 ### Data
@@ -43,15 +52,6 @@
 [![linefill](./.github/badges/api-linefill.svg)](./.github/badges/api-linefill.svg)
 
 ---
-
-This project aims to provide a Javascript/Typescript port for Tradingview's Pine Script.
-The current version does not run Pine Script directly, instead it runs a close Javascript equivalent called PineTS.
-
-PineTS makes it possible to migrate Pine Script v5+ indicators to Javascript/Typescript, in order to run them in a Javascript environment.
-
-## Disclaimer
-
-PineTS is an independent project and is not affiliated with, endorsed by, or associated with TradingView or Pine Script™. All trademarks and registered trademarks mentioned belong to their respective owners.
 
 ## Overview
 

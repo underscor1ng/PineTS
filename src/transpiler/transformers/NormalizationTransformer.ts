@@ -3,7 +3,7 @@
 
 import * as walk from 'acorn-walk';
 import { CONTEXT_NAME } from '../utils/ASTFactory';
-import { CONTEXT_CORE_VARS, CONTEXT_DATA_VARS, CONTEXT_PINE_VARS } from '../settings';
+import { CONTEXT_CORE_VARS, CONTEXT_DATA_VARS, CONTEXT_PINE_VARS, KNOWN_NAMESPACES } from '../settings';
 
 /**
  * Normalizes imports from context.data and context.pine to prevent renaming of native symbols.
@@ -94,8 +94,7 @@ export function normalizeNativeImports(ast: any): void {
                     }
                     // Handle direct namespace assignment: const ta2 = context.ta;
                     else if (decl.id.type === 'Identifier') {
-                        const validSingletonNames = ['ta', 'math', 'input', 'request', 'array'];
-                        if (validSingletonNames.includes(sourceName)) {
+                        if (KNOWN_NAMESPACES.includes(sourceName)) {
                             const originalName = sourceName;
                             const aliasName = decl.id.name;
 
