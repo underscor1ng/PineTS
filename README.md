@@ -158,18 +158,25 @@ const { result } = await pineTS.run((context) => {
 ## Project Goals
 
 PineTS aims for **full coverage** of Pine Script functions and capabilities. The ultimate goal is to enable running **original Pine Script code directly** without manual conversion to PineTS syntax.
+However, at the current stage, PineTS syntax allows running indicators with low conversion effort because it shares a vary close syntax with Pine Script.
 
--   Runtime Transpiler
--   Core Pine Script functions and variables
--   Series and scope management
--   Technical analysis functions
--   Mathematical functions
--   Input handling
--   Plots data handling
--   Market data connectors
--   Visualization add-ons
--   Strategy execution
--   Backtesting and simulation
+**Current Progress (v0.6.1)**:
+
+-   ✅ Runtime Transpiler (PineTS => JS)
+-   🚧 Pine to PineTS transpiler to allow running pine scripts directly (In-progress)
+-   ✅ Core Pine Script functions and variables (~75% coverage)
+-   ✅ Series and scope management
+-   ✅ Technical analysis functions (60+ indicators)
+-   ✅ Mathematical functions
+-   ✅ Arrays and Matrices (90+ operations)
+-   ✅ Input handling
+-   ✅ Plots data handling
+-   🚧 Market data connectors (Binance supported, others will be added)
+-   ✅ Realtime execution
+-   🚧 Visualization (In-progress)
+-   🚧 Scripts and Market data caching (In-progress)
+-   🎯 Strategy execution (planned)
+-   🎯 Backtesting and simulation (planned)
 
 ## Technical Details
 
