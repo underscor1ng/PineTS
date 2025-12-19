@@ -1,13 +1,14 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright (C) 2025 Alaa-eddine KADDOURI
+import { PineTS } from 'index';
+import { describe, expect, it } from 'vitest';
 
-import { describe, it, expect } from 'vitest';
-import { pineToJS } from '../../src/transpiler/pineToJS/pineToJS.index';
+import { Provider } from '@pinets/marketData/Provider.class';
 
-describe('Transpiler Scope Edge Cases', () => {
-    it('should convert MACD PineScript to JavaScript', () => {
+describe('Indicators', () => {
+    it('MACD from Pine Script source', async () => {
+        const pineTS = new PineTS(Provider.Binance, 'BTCUSDT', '1d', 100, 0, new Date('Dec 25 2024').getTime() - 1);
         const code = `
-//@version=5
+//@version=6
+indicator(title="Moving Average Convergence Divergence", shorttitle="MACD", timeframe="", timeframe_gaps=true)
 // Getting inputs
 fast_length = input(title = "Fast Length", defval = 12)
 slow_length = input(title = "Slow Length", defval = 26)
@@ -25,14 +26,15 @@ hist = macd - signal
 alertcondition(hist[1] >= 0 and hist < 0, title = 'Rising to falling', message = 'The MACD histogram switched from a rising to falling state')
 alertcondition(hist[1] <= 0 and hist > 0, title = 'Falling to rising', message = 'The MACD histogram switched from a falling to rising state')
 
-hline(0, "Zero Line", color = color.new(#787B86, 50), style=hline.style_dashed)
+hline(0, "Zero Line", color = color.new(#787B86, 50))
 plot(hist, title = "Histogram", style = plot.style_columns, color = (hist >= 0 ? (hist[1] < hist ? #26A69A : #B2DFDB) : (hist[1] < hist ? #FFCDD2 : #FF5252)))
 plot(macd,   title = "MACD",   color = #2962FF)
 plot(signal, title = "Signal", color = #FF6D00)
-        `;
+`;
 
-        const result = pineToJS(code);
-        console.log(result.code);
-        expect(result.code).toBeDefined();
+        const context = await pineTS.run(code);
+
+        console.log(context.plots);
+        expect(context.plots).toBeDefined();
     });
 });

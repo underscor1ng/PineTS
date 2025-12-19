@@ -16,6 +16,21 @@ const TYPE_CHECK = {
     //TODO should we exclude the other PineTS Objects ?
     remaining_options: (arg) => typeof arg === 'object' && !(arg instanceof Series),
 };
+
+export type PineTypeMap<T> = {
+    [K in keyof T]-?: T[K] extends number
+        ? 'number'
+        : T[K] extends string
+        ? 'string'
+        : T[K] extends boolean
+        ? 'boolean'
+        : T[K] extends Series
+        ? 'series'
+        : T[K] extends Array<any>
+        ? 'array'
+        : never;
+};
+
 /**
  * This function is used to parse the arguments for a Pine params.
  * @param args - The arguments to parse.

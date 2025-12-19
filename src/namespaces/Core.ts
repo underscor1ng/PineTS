@@ -22,25 +22,6 @@ const INDICATOR_SIGNATURE = [
     'dynamic_requests',
     'behind_chart',
 ];
-
-const PLOT_SIGNATURE = [
-    'series',
-    'title',
-    'color',
-    'linewidth',
-    'style',
-    'trackprice',
-    'histbase',
-    'offset',
-    'join',
-    'editable',
-    'show_last',
-    'display',
-    'format',
-    'precision',
-    'force_overlay',
-];
-
 const INDICATOR_ARGS_TYPES = {
     title: 'string',
     shorttitle: 'string',
@@ -59,24 +40,6 @@ const INDICATOR_ARGS_TYPES = {
     max_polylines_count: 'number',
     dynamic_requests: 'boolean',
     behind_chart: 'boolean',
-};
-
-const PLOT_ARGS_TYPES = {
-    series: 'series',
-    title: 'string',
-    color: 'string',
-    linewidth: 'number',
-    style: 'string',
-    trackprice: 'boolean',
-    histbase: 'number',
-    offset: 'number',
-    join: 'bool',
-    editable: 'boolean',
-    show_last: 'number',
-    display: 'string',
-    format: 'string',
-    precision: 'number',
-    force_overlay: 'boolean',
 };
 
 export function parseIndicatorOptions(args: any[]): Partial<IndicatorOptions> {
@@ -161,38 +124,6 @@ export class Core {
         return this.context.indicator;
     }
 
-    //in the current implementation, plot functions are only used to collect data for the plots array and map it to the market data
-    plotchar(series: number[], title: string, options: PlotCharOptions) {
-        if (!this.context.plots[title]) {
-            this.context.plots[title] = { data: [], options: this.extractPlotOptions(options), title };
-        }
-
-        const value = Series.from(series).get(0);
-
-        this.context.plots[title].data.push({
-            time: this.context.marketData[this.context.idx].openTime,
-            value: value,
-            options: { ...this.extractPlotOptions(options), style: 'char' },
-        });
-    }
-
-    plot(...args) {
-        const _parsed = parseArgsForPineParams<PlotOptions>(args, PLOT_SIGNATURE, PLOT_ARGS_TYPES);
-        const { series, title, ...others } = _parsed;
-        const options = this.extractPlotOptions(others);
-        if (!this.context.plots[title]) {
-            this.context.plots[title] = { data: [], options, title };
-        }
-
-        const value = Series.from(series).get(0);
-
-        this.context.plots[title].data.push({
-            time: this.context.marketData[this.context.idx].openTime,
-            value: value,
-            options: { color: options.color || '' },
-        });
-    }
-
     get bar_index() {
         return this.context.idx;
     }
@@ -216,9 +147,34 @@ export class Core {
         return NaN;
     }
 
+    alertcondition(condition, title, message) {
+        //console.warn('alertcondition called but is currently not implemented', condition, title, message);
+    }
     //types
     bool(series: any) {
         const val = Series.from(series).get(0);
         return !isNaN(val) && val !== 0;
+    }
+    int(series: any) {
+        const val = Series.from(series).get(0);
+        if (typeof val !== 'number')
+            throw new Error(
+                `Cannot call "int" with argument "x"="${val}". An argument of "literal string" type was used but a "simple int" is expected.`
+            );
+        return Math.floor(val);
+    }
+    float(series: any) {
+        const val = Series.from(series).get(0);
+        if (typeof val !== 'number')
+            throw new Error(
+                `Cannot call "float" with argument "x"="${val}". An argument of "literal string" type was used but a "const float" is expected.`
+            );
+        return val;
+    }
+    string(series: any) {
+        //Pine Script seems to be throwing an error for any argument that is not a string
+        //the following implementation might need to be updated in the future
+        const val = Series.from(series).get(0);
+        return val.toString();
     }
 }

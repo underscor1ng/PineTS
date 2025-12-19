@@ -4,7 +4,7 @@
 import * as walk from 'acorn-walk';
 import ScopeManager from '../analysis/ScopeManager';
 import { ASTFactory, CONTEXT_NAME } from '../utils/ASTFactory';
-import { KNOWN_NAMESPACES } from '../settings';
+import { KNOWN_NAMESPACES, NAMESPACES_LIKE } from '../settings';
 
 const UNDEFINED_ARG = {
     type: 'Identifier',
@@ -838,7 +838,7 @@ export function transformCallExpression(node: any, scopeManager: ScopeManager, n
     if (
         node.callee &&
         node.callee.type === 'Identifier' &&
-        KNOWN_NAMESPACES.includes(node.callee.name) &&
+        (KNOWN_NAMESPACES.includes(node.callee.name) || NAMESPACES_LIKE.includes(node.callee.name)) &&
         scopeManager.isContextBound(node.callee.name)
     ) {
         // Transform to namespace.any(...)

@@ -19,7 +19,7 @@ export class CodeGenerator {
         this.sourceCode = options.sourceCode || null;
         this.sourceLines = this.sourceCode ? this.sourceCode.split('\n') : [];
         this.lastCommentedLine = -1;
-        this.includeSourceComments = options.includeSourceComments !== false; // default true
+        this.includeSourceComments = options.includeSourceComments || false; // default false
     }
 
     generate(ast) {

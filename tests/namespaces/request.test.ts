@@ -13,7 +13,7 @@ describe('Request ', () => {
             const { close, open } = context.data;
             const { plot, plotchar, request } = context.pine;
 
-            const res = await request.security('BTCUSDC', 'W', close, false, false);
+            const res = request.security('BTCUSDC', 'W', close, false, false);
 
             plotchar(res, '_plotchar');
 
@@ -564,8 +564,6 @@ describe('Request ', () => {
         expect(plotdata_str.trim()).toEqual(expected_plot.trim());
     });
 
-    
-
     it('request.security_lower_tf with data', async () => {
         const pineTS = new PineTS(Provider.Mock, 'BTCUSDC', 'W', null, new Date('2018-12-10').getTime(), new Date('2019-05-06').getTime());
 
@@ -610,10 +608,7 @@ describe('Request ', () => {
         console.log('expected_plot', expected_plot);
         console.log('plotdata_str', plotdata_str);
         expect(plotdata_str.trim()).toEqual(expected_plot.trim());
-    });    
-
-
-
+    });
 
     it('request.security_lower_tf with expression', async () => {
         const pineTS = new PineTS(Provider.Mock, 'BTCUSDC', 'W', null, new Date('2018-12-10').getTime(), new Date('2019-05-06').getTime());
@@ -659,5 +654,5 @@ describe('Request ', () => {
         console.log('expected_plot', expected_plot);
         console.log('plotdata_str', plotdata_str);
         expect(plotdata_str.trim()).toEqual(expected_plot.trim());
-    });       
+    });
 });

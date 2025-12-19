@@ -1,6 +1,9 @@
 // Known Pine Script namespaces that might be used as functions or objects
 export const KNOWN_NAMESPACES = ['ta', 'math', 'request', 'array', 'input'];
 
+// This is used to transform ns() calls to ns.any() calls
+export const NAMESPACES_LIKE = ['hline'];
+
 // All known data variables in the context
 export const CONTEXT_DATA_VARS = ['open', 'high', 'low', 'close', 'volume', 'hl2', 'hlc3', 'ohlc4', 'openTime', 'closeTime'];
 
@@ -11,6 +14,7 @@ export const CONTEXT_PINE_VARS = [
     //plots
     'plotchar',
     'plot',
+    'hline',
 
     //declarations
     'indicator',
@@ -18,6 +22,7 @@ export const CONTEXT_PINE_VARS = [
     'library',
 
     //
+    'alertcondition',
     'fixnan',
     'na',
     'color',
@@ -52,4 +57,6 @@ export const CONTEXT_PINE_VARS = [
 ];
 
 // All known core variables in the context
-export const CONTEXT_CORE_VARS = ['na', 'nz', 'plot', 'plotchar', 'color'];
+//names exposed in legacy pine.core namespace
+//this will be deprecated then removed
+export const CONTEXT_CORE_VARS = ['na', 'nz', 'plot', 'plotchar', 'color', 'hline'];

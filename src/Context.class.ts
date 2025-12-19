@@ -16,6 +16,7 @@ import { Log } from './namespaces/Log';
 import { Str } from './namespaces/Str';
 import types from './namespaces/Types';
 import { Timeframe } from './namespaces/Timeframe';
+import { HlineHelper, PlotHelper } from './namespaces/Plot.helper';
 
 export class Context {
     public data: any = {
@@ -40,24 +41,24 @@ export class Context {
 
     // Combined namespace and core functions - the default way to access everything
     public pine: {
-        input: Input;
-        ta: TechnicalAnalysis;
-        math: PineMath;
-        request: PineRequest;
-        array: PineArray;
-        map: PineMap;
-        matrix: PineMatrix;
-        na: () => any;
-        plotchar: (...args: any[]) => any;
-        color: any;
-        plot: (...args: any[]) => any;
-        nz: (...args: any[]) => any;
-        bar_index: number;
-        syminfo: ISymbolInfo;
-        barstate: Barstate;
-        log: Log;
-        str: Str;
-        timeframe: Timeframe;
+        // input: Input;
+        // ta: TechnicalAnalysis;
+        // math: PineMath;
+        // request: PineRequest;
+        // array: PineArray;
+        // map: PineMap;
+        // matrix: PineMatrix;
+        // na: () => any;
+        // plotchar: (...args: any[]) => any;
+        // color: any;
+        // plot: (...args: any[]) => any;
+        // nz: (...args: any[]) => any;
+        // bar_index: number;
+        // syminfo: ISymbolInfo;
+        // barstate: Barstate;
+        // log: Log;
+        // str: Str;
+        // timeframe: Timeframe;
         [key: string]: any;
     };
 
@@ -115,13 +116,16 @@ export class Context {
         // Initialize core functions
         const core = new Core(this);
         const coreFunctions = {
-            plotchar: core.plotchar.bind(core),
+            // plot: core.plot.bind(core),
+            // plotchar: core.plotchar.bind(core),
+            // hline: core.hline.bind(core),
             na: core.na.bind(core),
             color: core.color,
-            plot: core.plot.bind(core),
+
             nz: core.nz.bind(core),
             indicator: core.indicator.bind(core),
             fixnan: core.fixnan.bind(core),
+            alertcondition: core.alertcondition.bind(core),
             //types
             bool: core.bool.bind(core),
         };
@@ -163,6 +167,24 @@ export class Context {
             ...coreFunctions,
             ...types,
         };
+
+        const plotHelper = new PlotHelper(this);
+        const hlineHelper = new HlineHelper(this);
+        this.bindContextObject(plotHelper, ['plot', 'plotchar']);
+        this.bindContextObject(hlineHelper, ['any', 'style_dashed', 'style_solid', 'style_dotted', 'param'], 'hline');
+    }
+
+    private bindContextObject(instance: any, entries: string[], root: string = '') {
+        if (root && !this.pine[root]) this.pine[root] = {};
+
+        const target = root ? this.pine[root] : this.pine;
+        for (const entry of entries) {
+            if (typeof instance[entry] === 'function') {
+                target[entry] = instance[entry].bind(instance);
+            } else {
+                target[entry] = instance[entry];
+            }
+        }
     }
 
     //#region [Runtime functions] ===========================
