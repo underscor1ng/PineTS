@@ -32,6 +32,7 @@ The visualization is done using the [Lightweight Charts](https://tradingview.git
     <div id="main-chart"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
 <!-- QFChart Library (Bundled with ECharts) -->
 <script src="./js/qfchart.min.browser.js"></script>
 
