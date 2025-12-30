@@ -1,7 +1,7 @@
 {
     "name": "pinets",
     "version": "0.7.5",
-    "description": "PineTS is the open-source transpiler and runtime that executes Pine Script logic in JavaScript environments (Node.js/Browser)",
+    "description": "Run PineScript code in JavaScript environments (Node.js/Browser) - PineTS is the open-source transpiler and runtime that brings Pine Script to JS ecosystem",
     "keywords": [
         "Pine Script",
         "Pine",
