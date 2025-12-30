@@ -17,8 +17,6 @@ describe('Indicators', () => {
             const bull_bias = ema9 > ema18;
             const bear_bias = ema9 < ema18;
 
-            bgcolor(bear_bias ? '#FFFFFF' : '#000000', 'Bear Bias');
-
             return {
                 bull_bias,
                 bear_bias,
