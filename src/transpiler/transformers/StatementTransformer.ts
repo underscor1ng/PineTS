@@ -277,6 +277,12 @@ export function transformVariableDeclaration(varNode: any, scopeManager: ScopeMa
                                     arg.parent = node;
                                 }
                             });
+                            
+                            // If the callee is an IIFE (ArrowFunctionExpression or FunctionExpression), traverse it
+                            if (node.callee.type === 'ArrowFunctionExpression' || node.callee.type === 'FunctionExpression') {
+                                c(node.callee, { parent: node });
+                            }
+                            
                             transformCallExpression(node, scopeManager);
 
                             if (node.type !== 'CallExpression') return;
@@ -327,6 +333,51 @@ export function transformVariableDeclaration(varNode: any, scopeManager: ScopeMa
                                     // Replace the AwaitExpression with just the identifier
                                     Object.assign(node, node.argument);
                                 }
+                            }
+                        },
+                        ArrowFunctionExpression(node: any, state: any, c: any) {
+                            // Traverse the body of arrow functions (needed for IIFE handling)
+                            if (node.body) {
+                                if (node.body.type === 'BlockStatement') {
+                                    // For block body, traverse each statement
+                                    node.body.body.forEach((stmt: any) => c(stmt, { parent: node.body }));
+                                } else {
+                                    // For expression body, traverse the expression
+                                    c(node.body, { parent: node });
+                                }
+                            }
+                        },
+                        FunctionExpression(node: any, state: any, c: any) {
+                            // Traverse the body of function expressions (needed for IIFE handling)
+                            if (node.body && node.body.type === 'BlockStatement') {
+                                node.body.body.forEach((stmt: any) => c(stmt, { parent: node.body }));
+                            }
+                        },
+                        SwitchStatement(node: any, state: any, c: any) {
+                            // Traverse discriminant and all cases
+                            if (node.discriminant) {
+                                node.discriminant.parent = node;
+                                c(node.discriminant, { parent: node });
+                            }
+                            if (node.cases) {
+                                node.cases.forEach((caseNode: any) => {
+                                    caseNode.parent = node;
+                                    c(caseNode, { parent: node });
+                                });
+                            }
+                        },
+                        SwitchCase(node: any, state: any, c: any) {
+                            // Traverse test (the case value)
+                            if (node.test) {
+                                node.test.parent = node;
+                                c(node.test, { parent: node });
+                            }
+                            // Traverse all consequent statements
+                            if (node.consequent) {
+                                node.consequent.forEach((stmt: any) => {
+                                    stmt.parent = node;
+                                    c(stmt, { parent: node });
+                                });
                             }
                         },
                     }
