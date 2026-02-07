@@ -138,7 +138,7 @@ export class Parser {
     }
 
     // Parse statement
-    parseStatement() {
+    parseStatement(handleCommas = true) {
         this.skipNewlines();
 
         const startLine = this.peek().line;
@@ -233,6 +233,26 @@ export class Parser {
         // Attach line number to statement
         if (stmt) {
             stmt._line = startLine;
+            
+            // Handle comma-separated statements on the same line: a = high, b = low
+            // Only handle commas at the top level (not in recursive calls)
+            if (handleCommas && this.match(TokenType.COMMA) && this.peek().line === startLine) {
+                const statements = [stmt];
+                
+                while (this.match(TokenType.COMMA) && this.peek().line === startLine) {
+                    this.advance(); // consume comma
+                    this.skipNewlines(true); // skip any whitespace after comma
+                    
+                    // Parse the next statement on the same line (don't handle commas recursively)
+                    const nextStmt = this.parseStatement(false);
+                    if (nextStmt) {
+                        statements.push(nextStmt);
+                    }
+                }
+                
+                // Return a BlockStatement containing all comma-separated statements
+                return new BlockStatement(statements);
+            }
         }
 
         return stmt;
@@ -281,6 +301,36 @@ export class Parser {
     }
 
     // Parse type definition (v5: type X => fields, v6: type X\n fields)
+    // Parse type expression with support for generics (e.g., array<float>, map<string, int>)
+    parseTypeExpression() {
+        // Parse base type (e.g., "array", "matrix", "map", "float")
+        const baseType = this.expect(TokenType.IDENTIFIER).value;
+        
+        // Check for generic parameters: array<float>, map<string, float>
+        if (this.match(TokenType.OPERATOR, '<')) {
+            this.advance(); // consume '<'
+            
+            const typeArgs = [];
+            
+            // Parse first type argument (recursive for nested generics)
+            typeArgs.push(this.parseTypeExpression());
+            
+            // Parse additional type arguments (for map<K, V>)
+            while (this.match(TokenType.COMMA)) {
+                this.advance();
+                this.skipNewlines();
+                typeArgs.push(this.parseTypeExpression());
+            }
+            
+            this.expect(TokenType.OPERATOR, '>'); // consume '>'
+            
+            // Return as string representation: "array<float>"
+            return baseType + '<' + typeArgs.join(', ') + '>';
+        }
+        
+        return baseType; // Simple type: "float", "int", etc.
+    }
+
     parseTypeDefinition() {
         this.expect(TokenType.KEYWORD, 'type');
         const name = this.expect(TokenType.IDENTIFIER).value;
@@ -300,7 +350,7 @@ export class Parser {
             if (this.match(TokenType.DEDENT)) break;
 
             // Parse field: type name [= defaultValue]
-            const fieldType = this.expect(TokenType.IDENTIFIER).value;
+            const fieldType = this.parseTypeExpression(); // Now handles generics
             const fieldName = this.expect(TokenType.IDENTIFIER).value;
 
             let defaultValue = null;

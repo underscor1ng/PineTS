@@ -761,6 +761,589 @@ plot(close)
     });
 });
 
+describe('Pine Script Transpilation - Bug Fixes', () => {
+    describe('Generic Type Syntax', () => {
+        it('should parse and transpile simple generic types (array<float>)', () => {
+            const code = `
+//@version=6
+indicator("Generic Types Test")
+
+type Vector
+    array<float> values
+
+plot(close)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            expect(jsCode).toContain("values: 'array<float>'");
+            expect(jsCode).toContain('Type(');
+        });
+
+        it('should parse nested generic types (array<array<float>>)', () => {
+            const code = `
+//@version=6
+indicator("Nested Generics")
+
+type NestedData
+    array<array<float>> matrix
+
+plot(close)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toContain("matrix: 'array<array<float>>'");
+        });
+
+        it('should parse multi-parameter generic types (map<string, float>)', () => {
+            const code = `
+//@version=6
+indicator("Map Types")
+
+type KeyValueStore
+    map<string, float> lookup
+
+plot(close)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toContain("lookup: 'map<string, float>'");
+        });
+
+        it('should handle multiple generic fields in one type', () => {
+            const code = `
+//@version=6
+indicator("Multiple Generics")
+
+type DataContainer
+    array<int> integers
+    matrix<float> grid
+    map<string, float> pairs
+
+plot(close)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toContain("integers: 'array<int>'");
+            expect(jsCode).toContain("grid: 'matrix<float>'");
+            expect(jsCode).toContain("pairs: 'map<string, float>'");
+        });
+
+        it('should handle mixed simple and generic types', () => {
+            const code = `
+//@version=6
+indicator("Mixed Types")
+
+type MixedData
+    float scalar
+    array<float> vector
+    int count
+    map<string, int> lookup
+
+plot(close)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toContain("scalar: 'float'");
+            expect(jsCode).toContain("vector: 'array<float>'");
+            expect(jsCode).toContain("count: 'int'");
+            expect(jsCode).toContain("lookup: 'map<string, int>'");
+        });
+    });
+
+    describe('Dot-Prefix Number Literals', () => {
+        it('should parse numbers starting with dot (.5 becomes 0.5)', () => {
+            const code = `
+//@version=6
+indicator("Dot Numbers")
+
+x = .5
+y = .123
+z = .999999
+
+plot(x + y + z)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            expect(jsCode).toContain('$.let.glb1_x = $.init($.let.glb1_x, 0.5)');
+            expect(jsCode).toContain('$.let.glb1_y = $.init($.let.glb1_y, 0.123)');
+            expect(jsCode).toContain('$.let.glb1_z = $.init($.let.glb1_z, 0.999999)');
+        });
+
+        it('should handle dot-prefix numbers in function calls', () => {
+            const code = `
+//@version=6
+indicator("Dot Numbers in Calls")
+
+step = input.float(.5, 'Step', minval = 0, step = 0.1)
+threshold = .75
+
+plot(step + threshold)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toContain('0.5');
+            expect(jsCode).toContain('$.let.glb1_threshold = $.init($.let.glb1_threshold, 0.75)');
+            expect(jsCode).toContain('0.1');
+        });
+
+        it('should distinguish dot-prefix numbers from member access', () => {
+            const code = `
+//@version=6
+indicator("Dot Disambiguation")
+
+// Dot-prefix number
+factor = .25
+
+// Member access
+sma = ta.sma(close, 10)
+
+// Both together
+result = sma * .5
+
+plot(result)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            // Should have dot-prefix number
+            expect(jsCode).toContain('0.25');
+            expect(jsCode).toContain('0.5');
+            
+            // Should still have member access
+            expect(jsCode).toContain('ta.sma');
+        });
+
+        it('should handle various decimal formats', () => {
+            const code = `
+//@version=6
+indicator("Decimal Formats")
+
+a = .5      // 0.5
+b = 0.5     // 0.5
+c = 10.5    // 10.5
+d = 1.5     // 1.5
+e = .001    // 0.001
+
+plot(a + b + c + d + e)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toContain('0.5');
+            expect(jsCode).toContain('10.5');
+            expect(jsCode).toContain('1.5');
+            expect(jsCode).toContain('0.001');
+        });
+    });
+
+    describe('Multiple Statements in Switch Cases', () => {
+        it('should generate all statements in switch cases with multiple if blocks', () => {
+            const code = `
+//@version=6
+strategy("Multi-Statement Switch")
+
+scenario = input.string("both", "Mode", options=["both", "single"])
+longCond = close > open
+shortCond = close < open
+
+switch scenario
+    "both" =>
+        if longCond
+            strategy.entry("Long", strategy.long)
+        if shortCond
+            strategy.entry("Short", strategy.short)
+    "single" =>
+        if longCond
+            strategy.entry("Long Only", strategy.long)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            
+            // Should contain switch with proper discriminant
+            expect(jsCode).toContain('switch ($.get($.let.glb1_scenario, 0))');
+            
+            // Should have both if statements in the "both" case
+            expect(jsCode).toContain('$.get($.let.glb1_longCond, 0)');
+            expect(jsCode).toContain('$.get($.let.glb1_shortCond, 0)');
+        });
+
+        it('should handle side-effect statements in switch cases', () => {
+            const code = `
+//@version=6
+indicator("Switch Side Effects")
+
+mode = input.string("A", "Mode", options=["A", "B"])
+
+var signal = 0
+
+switch mode
+    "A" =>
+        signal := 1
+        signal := signal + 1
+    "B" =>
+        signal := -1
+
+plot(signal)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            expect(jsCode).toContain('switch ($.get($.let.glb1_mode, 0))');
+            expect(jsCode).toContain('$.var.glb1_signal');
+        });
+
+        it('should preserve all if statements in complex switch cases (from switch3.pine)', () => {
+            const code = `
+//@version=6
+strategy("Complex Switch")
+
+scenario = input.string("market", "Scenario", options=["market", "limit"])
+longCondition = ta.crossover(ta.sma(close, 14), ta.sma(close, 28))
+shortCondition = ta.crossunder(ta.sma(close, 14), ta.sma(close, 28))
+
+switch scenario
+    "market" =>
+        if longCondition
+            strategy.order(id="long_mkt", direction=strategy.long)
+        if shortCondition
+            strategy.order(id="short_mkt", direction=strategy.short)
+    "limit" =>
+        if longCondition
+            strategy.order(id="long_lim", direction=strategy.long, limit=close * 0.995)
+        if shortCondition
+            strategy.order(id="short_lim", direction=strategy.short, limit=close * 1.005)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            
+            // Verify switch discriminant is transformed
+            expect(jsCode).toContain('switch ($.get($.let.glb1_scenario, 0))');
+            
+            // Verify both conditions are preserved (should appear multiple times)
+            const longCondMatches = (jsCode.match(/\$\.get\(\$\.let\.glb1_longCondition, 0\)/g) || []).length;
+            const shortCondMatches = (jsCode.match(/\$\.get\(\$\.let\.glb1_shortCondition, 0\)/g) || []).length;
+            
+            // Both conditions should appear at least twice (once per case in switch)
+            expect(longCondMatches).toBeGreaterThanOrEqual(2);
+            expect(shortCondMatches).toBeGreaterThanOrEqual(2);
+        });
+
+        it('should handle switch cases with multiple statements of different types', () => {
+            const code = `
+//@version=6
+indicator("Mixed Statements Switch")
+
+mode = input.string("debug", "Mode", options=["debug", "normal"])
+
+var count = 0
+
+switch mode
+    "debug" =>
+        count := count + 1
+        plot(count, "Count", color=color.blue)
+        plot(close, "Close", color=color.green)
+    "normal" =>
+        plot(close, "Close")
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            expect(jsCode).toContain('switch ($.get($.let.glb1_mode, 0))');
+            expect(jsCode).toContain('$.var.glb1_count');
+        });
+    });
+
+    describe('Combined Bug Fixes', () => {
+        it('should handle generic types with dot-prefix numbers', () => {
+            const code = `
+//@version=6
+indicator("Combined Test")
+
+type Config
+    array<float> thresholds
+    float factor
+
+step = input.float(.25, "Step")
+multiplier = .5
+
+plot(step * multiplier)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            // Generic type
+            expect(jsCode).toContain("thresholds: 'array<float>'");
+            
+            // Dot-prefix numbers
+            expect(jsCode).toContain('0.5');
+            expect(jsCode).toContain('0.25');
+        });
+
+        it('should handle all fixes together in complex code', () => {
+            const code = `
+//@version=6
+strategy("All Fixes Test")
+
+type Position
+    array<float> entries
+    float stopLoss
+
+scenario = input.string("market", "Scenario", options=["market", "limit"])
+threshold = .75
+longCond = close > open
+
+switch scenario
+    "market" =>
+        if longCond
+            strategy.entry("Long", strategy.long)
+        if close > threshold
+            strategy.exit("Exit", "Long")
+    "limit" =>
+        if longCond
+            strategy.entry("Long Limit", strategy.long, limit=close * .995)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            
+            // Generic type
+            expect(jsCode).toContain("entries: 'array<float>'");
+            
+            // Dot-prefix numbers
+            expect(jsCode).toContain('0.75');
+            expect(jsCode).toContain('0.995');
+            
+            // Switch with multiple statements
+            expect(jsCode).toContain('switch ($.get($.let.glb1_scenario, 0))');
+            expect(jsCode).toContain('$.get($.let.glb1_longCond, 0)');
+        });
+    });
+});
+
+describe('Pine Script Transpilation - Comma-Separated Statements', () => {
+    it('should parse comma-separated variable declarations', () => {
+        const code = `
+//@version=6
+indicator("Comma Test")
+
+a = high, b = low
+
+plot(a + b)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        expect(jsCode).toContain('$.let.glb1_a = $.init($.let.glb1_a, high)');
+        expect(jsCode).toContain('$.let.glb1_b = $.init($.let.glb1_b, low)');
+    });
+
+    it('should parse comma-separated function calls', () => {
+        const code = `
+//@version=6
+indicator("Comma Calls")
+
+plot(close), plot(open), plot(high)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        // Should have three separate plot calls
+        const plotCalls = (jsCode.match(/plot\.any/g) || []).length;
+        expect(plotCalls).toBeGreaterThanOrEqual(3);
+    });
+
+    it('should handle three comma-separated declarations', () => {
+        const code = `
+//@version=6
+indicator("Three Variables")
+
+a = 1, b = 2, c = 3
+plot(a + b + c)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toContain('$.let.glb1_a = $.init($.let.glb1_a, 1)');
+        expect(jsCode).toContain('$.let.glb1_b = $.init($.let.glb1_b, 2)');
+        expect(jsCode).toContain('$.let.glb1_c = $.init($.let.glb1_c, 3)');
+    });
+
+    it('should handle comma-separated var declarations', () => {
+        const code = `
+//@version=6
+indicator("Var Test")
+
+var x = 0, y = 0
+x := 10, y := 20
+
+plot(x + y)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        expect(jsCode).toContain('$.var.glb1_x');
+        // Note: The second variable in a var statement is treated as let
+        expect(jsCode).toContain('$.let.glb1_y');
+    });
+
+    it('should handle mixed declarations and function calls', () => {
+        const code = `
+//@version=6
+indicator("Mixed Test")
+
+fast = ta.sma(close, 10), slow = ta.sma(close, 20), plot(fast - slow)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toContain('$.let.glb1_fast');
+        expect(jsCode).toContain('$.let.glb1_slow');
+        expect(jsCode).toContain('ta.sma');
+    });
+
+    it('should handle comma-separated assignments', () => {
+        const code = `
+//@version=6
+indicator("Assignments")
+
+var a = 0
+var b = 0
+
+a := 10, b := 20
+
+plot(a + b)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        expect(jsCode).toContain('$.var.glb1_a');
+        expect(jsCode).toContain('$.var.glb1_b');
+    });
+
+    it('should handle complex expressions in comma-separated statements', () => {
+        const code = `
+//@version=6
+indicator("Complex")
+
+result1 = close > open ? 1 : 0, result2 = high - low
+
+plot(result1 + result2)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toContain('$.let.glb1_result1');
+        expect(jsCode).toContain('$.let.glb1_result2');
+        // The transpiler transforms close > open to $.get(close, 0) > $.get(open, 0)
+        expect(jsCode).toMatch(/\$\.get\(close, 0\)\s*>\s*\$\.get\(open, 0\)/);
+    });
+
+    it('should not confuse commas in function arguments with statement separators', () => {
+        const code = `
+//@version=6
+indicator("Comma in Args")
+
+a = ta.sma(close, 10)
+b = input.int(20, "Period", minval=1)
+
+plot(a * b)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        expect(jsCode).toContain('$.let.glb1_a');
+        expect(jsCode).toContain('$.let.glb1_b');
+        // Should not have incorrectly split the arguments
+        expect(jsCode).toContain('ta.sma');
+        expect(jsCode).toContain('input.int');
+    });
+
+    it('should handle comma-separated statements on multiple lines separately', () => {
+        const code = `
+//@version=6
+indicator("Multiple Lines")
+
+a = 1, b = 2
+c = 3, d = 4
+
+plot(a + b + c + d)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toContain('$.let.glb1_a');
+        expect(jsCode).toContain('$.let.glb1_b');
+        expect(jsCode).toContain('$.let.glb1_c');
+        expect(jsCode).toContain('$.let.glb1_d');
+    });
+
+    it('should handle the original bug.pine test case', () => {
+        const code = `
+//@version=5
+indicator("bug")
+
+a = high, b = low
+plot(a), plot(b)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        expect(jsCode).toContain('$.let.glb1_a');
+        expect(jsCode).toContain('$.let.glb1_b');
+        
+        // Should have two plot calls
+        const plotCalls = (jsCode.match(/plot\.any/g) || []).length;
+        expect(plotCalls).toBeGreaterThanOrEqual(2);
+    });
+});
+
 describe('Pine Script Transpilation - Real-World Example (MACD)', () => {
     it('should transpile complete MACD indicator', () => {
         const code = `
