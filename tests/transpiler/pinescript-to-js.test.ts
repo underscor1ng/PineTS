@@ -1344,6 +1344,129 @@ plot(a), plot(b)
     });
 });
 
+describe('Pine Script Transpilation - For-Of and For-In Loops', () => {
+    it('should handle for-of loops without breaking variable declarations', () => {
+        const code = `
+//@version=5
+indicator("For-Of Test")
+
+kernel_matrix(X1, X2, l)=>
+    km = close
+    
+    for x1 in X1
+        j = 0
+    
+    km
+
+plot(close)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        // Should contain for-of loop with $.get() on the iterable
+        expect(jsCode).toContain('for (const x1 of $.get(X1, 0))');
+        // Should NOT contain malformed loop syntax
+        expect(jsCode).not.toMatch(/for \([^)]+= undefined[^)]*of/);
+    });
+
+    it('should preserve for-of loop variables without transformation', () => {
+        const code = `
+//@version=6
+indicator("For-Of Variables")
+
+process_array(arr)=>
+    sum = 0.0
+    for item in arr
+        sum := sum + item
+    sum
+
+plot(close)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        // The iterable should use $.get(), but the loop variable should not be transformed
+        expect(jsCode).toContain('for (const item of $.get(arr, 0))');
+        expect(jsCode).not.toContain('$$.const.fn1_item');
+    });
+
+    it('should handle for-of loops with nested operations', () => {
+        const code = `
+//@version=6
+indicator("Nested For-Of")
+
+calculate(values)=>
+    result = 0.0
+    for val in values
+        temp = val * 2
+        result := result + temp
+    result
+
+plot(close)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        expect(jsCode).toContain('for (const val of $.get(values, 0))');
+        // The temp variable inside the loop should be transformed
+        expect(jsCode).toMatch(/\$\$\.let\.fn\d+_temp/);
+    });
+
+    it('should handle multiple for-of loops in same function', () => {
+        const code = `
+//@version=6
+indicator("Multiple For-Of")
+
+process(arr1, arr2)=>
+    sum1 = 0.0
+    for x in arr1
+        sum1 := sum1 + x
+    
+    sum2 = 0.0
+    for y in arr2
+        sum2 := sum2 + y
+    
+    sum1 + sum2
+
+plot(close)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toContain('for (const x of $.get(arr1, 0))');
+        expect(jsCode).toContain('for (const y of $.get(arr2, 0))');
+    });
+
+    it('should handle for-of with array operations', () => {
+        const code = `
+//@version=6
+indicator("For-Of with Arrays")
+
+sum_array(arr)=>
+    total = 0.0
+    for element in arr
+        total := total + element
+    total
+
+values = array.from(1, 2, 3, 4, 5)
+result = sum_array(values)
+plot(result)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        expect(jsCode).toContain('for (const element of $.get(arr, 0))');
+    });
+});
+
 describe('Pine Script Transpilation - Real-World Example (MACD)', () => {
     it('should transpile complete MACD indicator', () => {
         const code = `
