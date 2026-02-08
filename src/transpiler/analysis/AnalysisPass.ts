@@ -120,6 +120,7 @@ export function runAnalysisPass(ast: any, scopeManager: ScopeManager): string | 
             registerFunctionParameters(node, scopeManager);
             if (node.id && node.id.name) {
                 scopeManager.addReservedName(node.id.name);
+                scopeManager.addUserFunction(node.id.name);
             }
         },
         ArrowFunctionExpression(node: any) {

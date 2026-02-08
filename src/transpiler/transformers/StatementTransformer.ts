@@ -111,6 +111,11 @@ export function transformAssignmentExpression(node: any, scopeManager: ScopeMana
 
                 if (node.type !== 'CallExpression') return;
 
+                // Traverse the callee if it's a MemberExpression (to handle obj.method())
+                if (node.callee.type === 'MemberExpression') {
+                    c(node.callee, { parent: node, inNamespaceCall: isNamespaceCall || state.inNamespaceCall });
+                }
+
                 // Then transform its arguments with the correct context
                 node.arguments.forEach((arg: any) => c(arg, { parent: node, inNamespaceCall: isNamespaceCall || state.inNamespaceCall }));
             },
@@ -280,6 +285,11 @@ export function transformVariableDeclaration(varNode: any, scopeManager: ScopeMa
                             transformCallExpression(node, scopeManager);
 
                             if (node.type !== 'CallExpression') return;
+
+                            // Traverse the callee if it's a MemberExpression (to handle obj.method())
+                            if (node.callee.type === 'MemberExpression') {
+                                c(node.callee, { parent: node });
+                            }
 
                             // Continue walking the arguments
                             node.arguments.forEach((arg) => c(arg, { parent: node }));

@@ -59,6 +59,7 @@ export class ScopeManager {
     private hoistingStack: any[][] = [];
     private suppressHoisting: boolean = false;
     private reservedNames: Set<string> = new Set();
+    private userFunctions: Set<string> = new Set();
 
     public get nextParamIdArg(): any {
         return {
@@ -179,6 +180,14 @@ export class ScopeManager {
 
     addReservedName(name: string): void {
         this.reservedNames.add(name);
+    }
+
+    addUserFunction(name: string): void {
+        this.userFunctions.add(name);
+    }
+
+    isUserFunction(name: string): boolean {
+        return this.userFunctions.has(name);
     }
 
     addVariable(name: string, kind: string): string {

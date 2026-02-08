@@ -948,6 +948,11 @@ export function transformCallExpression(node: any, scopeManager: ScopeManager, n
         return;
     }
 
+    if (node.callee && node.callee.name === 'kernel_matrix') {
+        // console.log('Transforming kernel_matrix call');
+        // console.log('Arguments before:', node.arguments.map((a: any) => a.name));
+    }
+
     // Check if this is a direct call to a known namespace (e.g. input(...))
     if (
         node.callee &&
@@ -1097,6 +1102,59 @@ export function transformCallExpression(node: any, scopeManager: ScopeManager, n
 
     // Handle method calls on local variables (e.g. arr.set())
     if (!isNamespaceCall && node.callee && node.callee.type === 'MemberExpression') {
+        const methodName = node.callee.property.name;
+        // Check if methodName is a user-defined function (and not a built-in property like push/pop/size unless shadowed?)
+        const isUserFunction = scopeManager.isUserFunction(methodName);
+
+        if (isUserFunction && !scopeManager.isContextBound(methodName)) {
+            // It's a user variable/function.
+            // Transform obj.method(args) -> method(obj, args)
+            // 1. Get the object (first arg)
+            const obj = node.callee.object;
+            // 2. Get the method name (function to call)
+            const method = node.callee.property;
+            
+            // 3. Transform arguments
+            const transformedArgs = node.arguments.map((arg: any) => {
+                if (arg._isParamCall) return arg;
+                return transformFunctionArgument(arg, CONTEXT_NAME, scopeManager);
+            });
+
+            // 4. Transform the object (it becomes the first argument)
+            // We need to ensure it's properly scoped/wrapped if it's a variable
+            // transformIdentifierForParam might be needed if it's an identifier
+            let transformedObj = obj;
+            if (obj.type === 'Identifier') {
+                 // Use transformIdentifier logic but we need it as an argument
+                 // transformFunctionArgument handles identifiers correctly
+                 transformedObj = transformFunctionArgument(obj, CONTEXT_NAME, scopeManager);
+            } else if (obj.type === 'CallExpression') {
+                 // If object is a call expression, transform it first
+                 transformCallExpression(obj, scopeManager);
+                 transformedObj = transformFunctionArgument(obj, CONTEXT_NAME, scopeManager);
+            }
+
+            // 5. Construct the new call: method(obj, ...args)
+            // We need to use $.call(method, id, obj, ...args) pattern because it's a user function
+            
+            // Create $.call access
+            const contextCall = ASTFactory.createMemberExpression(ASTFactory.createContextIdentifier(), ASTFactory.createIdentifier('call'));
+            const callId = scopeManager.getNextUserCallId();
+
+            // The method identifier needs to be transformed to its scoped name if necessary
+            // But here 'method' is just the property name node. We need an Identifier for the function.
+            // Since function declarations are not renamed in transformFunctionDeclaration and are local identifiers,
+            // we should use the identifier directly.
+            const functionRef = ASTFactory.createIdentifier(methodName);
+
+            const newArgs = [functionRef, callId, transformedObj, ...transformedArgs];
+
+            node.callee = contextCall;
+            node.arguments = newArgs;
+            node._transformed = true;
+            return;
+        }
+
         if (node.callee.object.type === 'Identifier') {
             transformIdentifier(node.callee.object, scopeManager);
         }

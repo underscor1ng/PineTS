@@ -9,17 +9,20 @@
 
 ### Fixed
 
+-   **For Loops**: Fixed transpiler bugs with Pine Script array iteration:
+    -   Fixed `for...in` syntax when using Pine Script arrays.
+    -   Fixed `for...of` syntax handling in PineTS syntax, including destructuring support (e.g., `for [i, x] in arr`).
+    -   Fixed function/variable name collision issues in loop contexts.
+-   **Method Call Syntax**: Fixed method call syntax for user-defined functions (e.g., `obj.method()` where `method` is a user function). The transpiler now correctly transforms these into function calls `method(obj, ...args)`.
+-   **Method Chains**: Fixed AST traversal for method chains (e.g., `func(arg).method()`) to ensure arguments in the chain are correctly transformed.
 -   **Switch Statement**: Fixed multiple issues with switch statement transpilation:
     -   Fixed switch expression when used outside of a function.
     -   Fixed generated IIFE (Immediately Invoked Function Expression) for switch statements.
     -   Fixed multi-line switch body handling.
     -   Improved switch syntax conversion in Pine Script to PineTS transpiler.
 -   **Unary Operators**: Fixed transpiler to properly transform function calls within unary expressions (e.g., `!func()`).
--   **For Loops**: Fixed transpiler bugs with Pine Script array iteration:
-    -   Fixed `for...in` syntax when using Pine Script arrays.
-    -   Fixed `for...of` syntax handling in PineTS syntax
-    -   Fixed function/variable name collision issues in loop contexts.
 -   **Matrix Operations**: Fixed matrix operations transpilation issues.
+-   **Linter Fixes**: Resolved TypeScript linter errors in transformer code.
 
 ### Changed
 
