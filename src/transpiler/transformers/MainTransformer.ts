@@ -134,6 +134,18 @@ export function runTransformationPass(
             // Mark the left (variable declaration) to skip transformation
             if (node.left && node.left.type === 'VariableDeclaration') {
                 node.left._skipTransformation = true;
+
+                // Register loop variables
+                const decl = node.left.declarations[0];
+                if (decl.id.type === 'Identifier') {
+                    state.addLoopVariable(decl.id.name);
+                } else if (decl.id.type === 'ArrayPattern') {
+                    decl.id.elements.forEach((elem: any) => {
+                        if (elem.type === 'Identifier') {
+                            state.addLoopVariable(elem.name);
+                        }
+                    });
+                }
             }
             // Transform the right (iterable expression) - parameters should use $.get()
             if (node.right && node.right.type === 'Identifier') {
@@ -148,13 +160,26 @@ export function runTransformationPass(
                 const currentRight = { ...node.right };
                 
                 // Create MemberExpression: currentRight.array
-                const arrayAccess = ASTFactory.createMemberExpression(
+                let arrayAccess = ASTFactory.createMemberExpression(
                     currentRight,
                     ASTFactory.createIdentifier('array'),
                     false
                 );
+
+                // If destructuring, add .entries()
+                if (node.left && node.left.type === 'VariableDeclaration' && 
+                    node.left.declarations[0].id.type === 'ArrayPattern') {
+                    arrayAccess = ASTFactory.createCallExpression(
+                        ASTFactory.createMemberExpression(
+                            arrayAccess,
+                            ASTFactory.createIdentifier('entries'),
+                            false
+                        ),
+                        []
+                    );
+                }
                 
-                // Replace node.right with the new MemberExpression
+                // Replace node.right with the new MemberExpression/CallExpression
                 Object.assign(node.right, arrayAccess);
                 
             } else if (node.right) {

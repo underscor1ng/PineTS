@@ -1447,6 +1447,27 @@ plot(close)
         expect(jsCode).not.toContain('$$.const.fn1_item');
     });
 
+    it('should handle for-of loops with destructuring', () => {
+        const code = `
+//@version=5
+indicator("For-Of Destructuring")
+
+kernel_matrix(X1)=>
+    for [idx, x1] in X1
+        j = 0
+    0
+
+plot(close)
+        `;
+
+        const result = transpile(code);
+        const jsCode = result.toString();
+
+        expect(jsCode).toBeDefined();
+        // Should contain for-of loop with .entries()
+        expect(jsCode).toContain('for (const [idx, x1] of $.get(X1, 0).array.entries())');
+    });
+
     it('should handle for-of loops with nested operations', () => {
         const code = `
 //@version=6
