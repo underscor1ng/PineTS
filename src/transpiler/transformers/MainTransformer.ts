@@ -138,11 +138,11 @@ export function runTransformationPass(
                 // Register loop variables
                 const decl = node.left.declarations[0];
                 if (decl.id.type === 'Identifier') {
-                    state.addLoopVariable(decl.id.name);
+                    state.addLoopVariable(decl.id.name, decl.id.name);
                 } else if (decl.id.type === 'ArrayPattern') {
                     decl.id.elements.forEach((elem: any) => {
                         if (elem.type === 'Identifier') {
-                            state.addLoopVariable(elem.name);
+                            state.addLoopVariable(elem.name, elem.name);
                         }
                     });
                 }
