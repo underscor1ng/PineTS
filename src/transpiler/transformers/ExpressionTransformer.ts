@@ -36,6 +36,19 @@ export function transformArrayIndex(node: any, scopeManager: ScopeManager): void
         if (scopeManager.isLoopVariable(node.property.name)) {
             // Transform the object if it's a context-bound variable
             if (node.object.type === 'Identifier' && !scopeManager.isLoopVariable(node.object.name)) {
+                // Local series vars (e.g., function parameters) should be wrapped with $.get()
+                // but stay as plain identifiers (not scoped to $.let.*)
+                if (scopeManager.isLocalSeriesVar(node.object.name)) {
+                    // Transform to $.get(paramName, index)
+                    const plainIdentifier = ASTFactory.createIdentifier(node.object.name);
+                    // Mark this identifier to skip further transformations
+                    plainIdentifier._skipTransformation = true;
+                    const getCall = ASTFactory.createGetCall(plainIdentifier, node.property);
+                    Object.assign(node, getCall);
+                    node._indexTransformed = true;
+                    return;
+                }
+
                 if (!scopeManager.isContextBound(node.object.name)) {
                     // Transform to $.get($.kind.scopedName, loopVar)
                     const contextVarRef = createScopedVariableReference(node.object.name, scopeManager);
@@ -59,6 +72,19 @@ export function transformArrayIndex(node: any, scopeManager: ScopeManager): void
 
     if (node.computed && node.object.type === 'Identifier') {
         if (scopeManager.isLoopVariable(node.object.name)) {
+            return;
+        }
+
+        // Local series vars (e.g., function parameters) should be wrapped with $.get()
+        // but stay as plain identifiers (not scoped to $.let.*)
+        if (scopeManager.isLocalSeriesVar(node.object.name)) {
+            // Transform to $.get(paramName, index)
+            const plainIdentifier = ASTFactory.createIdentifier(node.object.name);
+            // Mark this identifier to skip further transformations
+            plainIdentifier._skipTransformation = true;
+            const getCall = ASTFactory.createGetCall(plainIdentifier, node.property);
+            Object.assign(node, getCall);
+            node._indexTransformed = true;
             return;
         }
 
@@ -88,6 +114,11 @@ export function addArrayAccess(node: any, scopeManager: ScopeManager): void {
 }
 
 export function transformIdentifier(node: any, scopeManager: ScopeManager): void {
+    // Skip if marked for no transformation (e.g., function parameters in $.get() calls)
+    if (node._skipTransformation) {
+        return;
+    }
+
     // Transform identifiers to use the context object
     if (node.name !== CONTEXT_NAME) {
         // Special handling for 'na' - replace with NaN unless it's a function call
@@ -296,12 +327,15 @@ export function transformMemberExpression(memberNode: any, originalParamName: st
         // Check if this member expression is NOT already the callee of a CallExpression
         const isAlreadyBeingCalled = memberNode.parent && memberNode.parent.type === 'CallExpression' && memberNode.parent.callee === memberNode;
 
-        // Also check if this is part of a destructuring or variable declaration
+        // Check if this is part of a destructuring pattern (array or object destructuring)
+        // We want to skip only for actual destructuring, not simple assignments
         const isInDestructuring =
             memberNode.parent &&
-            (memberNode.parent.type === 'VariableDeclarator' ||
-                memberNode.parent.type === 'Property' ||
-                memberNode.parent.type === 'AssignmentExpression');
+            ((memberNode.parent.type === 'VariableDeclarator' &&
+                (memberNode.parent.id.type === 'ArrayPattern' || memberNode.parent.id.type === 'ObjectPattern')) ||
+                (memberNode.parent.type === 'AssignmentExpression' &&
+                    (memberNode.parent.left.type === 'ArrayPattern' || memberNode.parent.left.type === 'ObjectPattern')) ||
+                memberNode.parent.type === 'Property');
 
         if (!isAlreadyBeingCalled && !isInDestructuring) {
             // Convert namespace.method to namespace.method()
@@ -683,6 +717,18 @@ function getParamFromUnaryExpression(node: any, scopeManager: ScopeManager, name
         end: node.end,
     };
 
+    // Walk through the unary expression to transform any function calls
+    walk.recursive(unaryExpr, scopeManager, {
+        CallExpression(node: any, scopeManager: ScopeManager) {
+            if (!node._transformed) {
+                transformCallExpression(node, scopeManager);
+            }
+        },
+        MemberExpression(node: any) {
+            transformMemberExpression(node, '', scopeManager);
+        },
+    });
+
     return unaryExpr;
 }
 
@@ -902,6 +948,11 @@ export function transformCallExpression(node: any, scopeManager: ScopeManager, n
         return;
     }
 
+    if (node.callee && node.callee.name === 'kernel_matrix') {
+        // console.log('Transforming kernel_matrix call');
+        // console.log('Arguments before:', node.arguments.map((a: any) => a.name));
+    }
+
     // Check if this is a direct call to a known namespace (e.g. input(...))
     if (
         node.callee &&
@@ -953,10 +1004,7 @@ export function transformCallExpression(node: any, scopeManager: ScopeManager, n
                 let leftOperand;
                 if (localCtxName) {
                     // $$.id
-                    leftOperand = ASTFactory.createMemberExpression(
-                        ASTFactory.createLocalContextIdentifier(),
-                        ASTFactory.createIdentifier('id')
-                    );
+                    leftOperand = ASTFactory.createMemberExpression(ASTFactory.createLocalContextIdentifier(), ASTFactory.createIdentifier('id'));
                 } else {
                     // Fallback to empty string if not found (should not happen in valid PineTS)
                     leftOperand = ASTFactory.createLiteral('');
@@ -1054,6 +1102,59 @@ export function transformCallExpression(node: any, scopeManager: ScopeManager, n
 
     // Handle method calls on local variables (e.g. arr.set())
     if (!isNamespaceCall && node.callee && node.callee.type === 'MemberExpression') {
+        const methodName = node.callee.property.name;
+        // Check if methodName is a user-defined function (and not a built-in property like push/pop/size unless shadowed?)
+        const isUserFunction = scopeManager.isUserFunction(methodName);
+
+        if (isUserFunction && !scopeManager.isContextBound(methodName)) {
+            // It's a user variable/function.
+            // Transform obj.method(args) -> method(obj, args)
+            // 1. Get the object (first arg)
+            const obj = node.callee.object;
+            // 2. Get the method name (function to call)
+            const method = node.callee.property;
+            
+            // 3. Transform arguments
+            const transformedArgs = node.arguments.map((arg: any) => {
+                if (arg._isParamCall) return arg;
+                return transformFunctionArgument(arg, CONTEXT_NAME, scopeManager);
+            });
+
+            // 4. Transform the object (it becomes the first argument)
+            // We need to ensure it's properly scoped/wrapped if it's a variable
+            // transformIdentifierForParam might be needed if it's an identifier
+            let transformedObj = obj;
+            if (obj.type === 'Identifier') {
+                 // Use transformIdentifier logic but we need it as an argument
+                 // transformFunctionArgument handles identifiers correctly
+                 transformedObj = transformFunctionArgument(obj, CONTEXT_NAME, scopeManager);
+            } else if (obj.type === 'CallExpression') {
+                 // If object is a call expression, transform it first
+                 transformCallExpression(obj, scopeManager);
+                 transformedObj = transformFunctionArgument(obj, CONTEXT_NAME, scopeManager);
+            }
+
+            // 5. Construct the new call: method(obj, ...args)
+            // We need to use $.call(method, id, obj, ...args) pattern because it's a user function
+            
+            // Create $.call access
+            const contextCall = ASTFactory.createMemberExpression(ASTFactory.createContextIdentifier(), ASTFactory.createIdentifier('call'));
+            const callId = scopeManager.getNextUserCallId();
+
+            // The method identifier needs to be transformed to its scoped name if necessary
+            // But here 'method' is just the property name node. We need an Identifier for the function.
+            // Since function declarations are not renamed in transformFunctionDeclaration and are local identifiers,
+            // we should use the identifier directly.
+            const functionRef = ASTFactory.createIdentifier(methodName);
+
+            const newArgs = [functionRef, callId, transformedObj, ...transformedArgs];
+
+            node.callee = contextCall;
+            node.arguments = newArgs;
+            node._transformed = true;
+            return;
+        }
+
         if (node.callee.object.type === 'Identifier') {
             transformIdentifier(node.callee.object, scopeManager);
         }

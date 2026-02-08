@@ -119,4 +119,76 @@ describe('Stream API', () => {
             }, 2000);
         });
     });
+
+    it('should produce consistent results between streaming and non-streaming execution', async () => {
+        const periods = 1500;
+        // Use consistent provider and symbol
+        const pineTS = new PineTS(Provider.Binance, 'BTCUSDC', '60', periods);
+        
+        // Wait for data to be ready (ensure we have data for run() later)
+        // Note: stream() usually handles init, but run() might need it if called separately.
+        // However, pineTS instance handles it.
+        
+        const sourceCode = (context: any) => {
+            const { close } = context.data;
+            const { ta } = context.pine;
+            const sma = ta.sma(close, 9);
+            return { sma };
+        };
+
+        const pageSize = 600;
+        const accumulatedSma: number[] = [];
+        const pageSizes: number[] = [];
+
+        return new Promise<void>((resolve, reject) => {
+            const evt = pineTS.stream(sourceCode, { pageSize, live: false, interval: 0 });
+
+            evt.on('data', (pageContext: any) => {
+                const currentPageSize = pageContext.result.sma.length;
+                pageSizes.push(currentPageSize);
+                accumulatedSma.push(...pageContext.result.sma);
+            });
+
+            evt.on('error', (error: any) => {
+                reject(error);
+            });
+
+            setTimeout(async () => {
+                try {
+                    // Run non-paginated version for comparison
+                    // We reuse the same pineTS instance which already has data loaded ideally,
+                    // or it will refetch/use cached.
+                    // Important: ensure run() uses same periods
+                    const completeContext = (await pineTS.run(sourceCode, periods)) as any;
+                    const completeSma = completeContext.result.sma;
+
+                    // Verify page structure
+                    const expectedPages = Math.ceil(periods / pageSize);
+                    // Depending on how pagination implementation handles remainders/updates
+                    // The example expects strict equality in accumulated length
+                    
+                    expect(pageSizes.length).toBeGreaterThanOrEqual(expectedPages);
+                    expect(accumulatedSma.length).toBe(completeSma.length);
+                    
+                    // Verify values match
+                    
+                    // Checking first, middle, last to save time on massive array comparison in test logs
+                    if (accumulatedSma.length > 0) {
+                        expect(accumulatedSma[0]).toBe(completeSma[0]);
+                        expect(accumulatedSma[accumulatedSma.length - 1]).toBe(completeSma[completeSma.length - 1]);
+                        
+                        const mid = Math.floor(accumulatedSma.length / 2);
+                        expect(accumulatedSma[mid]).toBe(completeSma[mid]);
+                    }
+
+                    // Deep equality check
+                    expect(accumulatedSma).toEqual(completeSma);
+
+                    resolve();
+                } catch (error) {
+                    reject(error);
+                }
+            }, 3000);
+        });
+    });
 });

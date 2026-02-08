@@ -273,6 +273,12 @@ export class Lexer {
         let value = '';
         let hasDecimal = false;
 
+        // Handle numbers starting with dot (e.g., .5 instead of 0.5)
+        if (this.peek() === '.' && this.isDigit(this.peek(1))) {
+            hasDecimal = true;
+            value += this.advance(); // consume the dot
+        }
+
         while (this.pos < this.source.length) {
             const ch = this.peek();
 
@@ -405,6 +411,11 @@ export class Lexer {
                 this.addToken(TokenType.COMMA, ch);
                 return true;
             case '.':
+                // Check if this is a number starting with dot (e.g., .5 instead of 0.5)
+                if (this.isDigit(this.peek(1))) {
+                    this.readNumber();
+                    return true;
+                }
                 this.advance();
                 this.addToken(TokenType.DOT, ch);
                 return true;

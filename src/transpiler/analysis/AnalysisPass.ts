@@ -92,32 +92,35 @@ export function preProcessContextBoundVars(ast: any, scopeManager: ScopeManager)
 }
 
 export function transformArrowFunctionParams(node: any, scopeManager: ScopeManager, isRootFunction: boolean = false): void {
-    // Register arrow function parameters as context-bound
+    // Register arrow function parameters as context-bound ONLY if it's the root function
+    // Non-root function parameters should NOT be globally context-bound
     node.params.forEach((param: any) => {
         if (param.type === 'Identifier') {
-            scopeManager.addContextBoundVar(param.name, isRootFunction);
+            if (isRootFunction) {
+                scopeManager.addContextBoundVar(param.name, isRootFunction);
+            }
+            // For non-root functions, parameters are handled within their function scope
         }
     });
 }
 
 // Local helper to register function parameters without transforming body
 function registerFunctionParameters(node: any, scopeManager: ScopeManager): void {
-    // Register function parameters as context-bound (but not as root params)
-    node.params.forEach((param: any) => {
-        if (param.type === 'Identifier') {
-            scopeManager.addContextBoundVar(param.name, false);
-        }
-    });
+    // NOTE: Function parameters should NOT be registered as globally context-bound
+    // as this prevents global variables with the same names from being scoped.
+    // Parameters are handled correctly within their function scope during transformation.
+    // This function is kept for backwards compatibility but does nothing now.
 }
 
 export function runAnalysisPass(ast: any, scopeManager: ScopeManager): string | undefined {
     let originalParamName: string | undefined;
 
-    walk.simple(ast, {
+    walk.ancestor(ast, {
         FunctionDeclaration(node: any) {
             registerFunctionParameters(node, scopeManager);
             if (node.id && node.id.name) {
                 scopeManager.addReservedName(node.id.name);
+                scopeManager.addUserFunction(node.id.name);
             }
         },
         ArrowFunctionExpression(node: any) {
@@ -128,7 +131,10 @@ export function runAnalysisPass(ast: any, scopeManager: ScopeManager): string | 
             }
             transformArrowFunctionParams(node, scopeManager, isRootFunction);
         },
-        VariableDeclaration(node: any) {
+        VariableDeclaration(node: any, ancestors: any[]) {
+            const parent = ancestors.length > 1 ? ancestors[ancestors.length - 2] : null;
+            const isForLoop = parent && (parent.type === 'ForOfStatement' || parent.type === 'ForInStatement') && parent.left === node;
+
             node.declarations.forEach((decl: any) => {
                 if (decl.id.type === 'Identifier') {
                     scopeManager.addReservedName(decl.id.name);
@@ -145,6 +151,8 @@ export function runAnalysisPass(ast: any, scopeManager: ScopeManager): string | 
                             scopeManager.addReservedName(element.name);
                         }
                     });
+
+                    if (isForLoop) return;
 
                     // Generate a unique temporary variable name
                     const tempVarName = scopeManager.generateTempVar();

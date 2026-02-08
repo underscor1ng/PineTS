@@ -151,6 +151,55 @@ if (na(n_a)) {
         expect(result).toBe(expected_code);
     });
 
+    it('unary operator in expressions', async () => {
+        const fakeContext = {};
+        const transformer = transpile.bind(fakeContext);
+
+        // we expect the transpiler to wrap the code in a context function and add missing namespaces
+        const source = `//@version=6
+indicator("RSI Divergence Detector", overlay=false)
+
+
+up = ta.rma(math.max(ta.change(close), 0), 14)
+down = ta.rma(-math.min(ta.change(close), 0), 14)`;
+
+        let transpiled = transformer(source);
+
+        console.log(transpiled.toString());
+        const result = transpiled.toString().trim();
+
+        /* prettier-ignore */
+        const expected_code = `async $ => {
+  const {close} = $.data;
+  const {ta, math, indicator} = $.pine;
+  const p0 = $.param('RSI Divergence Detector', undefined, 'p0');
+  const p1 = $.param({
+    overlay: false
+  }, undefined, 'p1');
+  indicator(p0, p1);
+  const p2 = ta.param(close, undefined, 'p2');
+  const temp_1 = ta.change(p2, "_ta0");
+  const p3 = math.param(temp_1, undefined, 'p3');
+  const p4 = math.param(0, undefined, 'p4');
+  const temp_2 = math.max(p3, p4);
+  const p5 = ta.param(temp_2, undefined, 'p5');
+  const p6 = ta.param(14, undefined, 'p6');
+  const temp_3 = ta.rma(p5, p6, "_ta1");
+  $.let.glb1_up = $.init($.let.glb1_up, temp_3);
+  const p7 = ta.param(close, undefined, 'p7');
+  const temp_4 = ta.change(p7, "_ta2");
+  const p8 = math.param(temp_4, undefined, 'p8');
+  const p9 = math.param(0, undefined, 'p9');
+  const temp_5 = math.min(p8, p9);
+  const p10 = ta.param(-temp_5, undefined, 'p10');
+  const p11 = ta.param(14, undefined, 'p11');
+  const temp_6 = ta.rma(p10, p11, "_ta3");
+  $.let.glb1_down = $.init($.let.glb1_down, temp_6);
+}`;
+
+        expect(result).toBe(expected_code);
+    });
+
     it('Inputs', async () => {
         const fakeContext = {};
         const transformer = transpile.bind(fakeContext);
