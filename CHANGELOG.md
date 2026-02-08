@@ -1,12 +1,40 @@
 # Change Log
 
-## [0.8.6] - 2026-01-27 - Binance Data Provider Hotfixes
+## [0.8.7] - 2026-02-08 - Pine Script Transpiler Enhancements & Fixes
+
+### Added
+
+-   **Tuple Support**: Added support for tuple destructuring in `for...in` syntax (e.g., `for [a, b] in array`).
+-   **Unit Tests**: Added comprehensive unit tests for switch statement transpilation and unary operator handling.
+
 ### Fixed
- - **Binance Provider** : Wrong handling of stream data when sDate and eDate are not provided
+
+-   **Switch Statement**: Fixed multiple issues with switch statement transpilation:
+    -   Fixed switch expression when used outside of a function.
+    -   Fixed generated IIFE (Immediately Invoked Function Expression) for switch statements.
+    -   Fixed multi-line switch body handling.
+    -   Improved switch syntax conversion in Pine Script to PineTS transpiler.
+-   **Unary Operators**: Fixed transpiler to properly transform function calls within unary expressions (e.g., `!func()`).
+-   **For Loops**: Fixed transpiler bugs with Pine Script array iteration:
+    -   Fixed `for...in` syntax when using Pine Script arrays.
+    -   Fixed `for...of` syntax handling in PineTS syntax
+    -   Fixed function/variable name collision issues in loop contexts.
+-   **Matrix Operations**: Fixed matrix operations transpilation issues.
+
+### Changed
+
+-   **Pine Script Parser**: Enhanced Pine Script to JavaScript transpiler phase with improved error handling and syntax support.
+
+## [0.8.6] - 2026-01-27 - Binance Data Provider Hotfixes
+
+### Fixed
+
+-   **Binance Provider** : Wrong handling of stream data when sDate and eDate are not provided
 
 ## [0.8.5] - 2026-01-27 - Transpiler Hotfixes
 
 ### Fixed
+
 -   **Deprecation Warnings**: Fixed wrong warning message appearing with valid code.
 -   **Pine Script Parser**: Fixed multiline Pine Script conditions parsing (indent error).
 -   **Transpiler**: Fixed `switch` statement syntax conversion.
@@ -14,16 +42,16 @@
 ## [0.8.4] - 2026-01-24 - Math Namespace Enhancements & Critical Fixes
 
 ### Added
+
 -   **Math Namespace**: Added `math.todegrees` and `math.toradians` functions. (contribution)
 
 ### Fixed
+
 -   **Math Namespace**: Fixed `math.precision` implementation and `math.round` precision parameter handling.
 -   **Variable Scope Collision**: Fixed critical issue where local variables (`var`, `let`, `const`) in user-defined functions were sharing state across different function calls. Implemented dynamic scoping using unique call IDs to ensure each function instance maintains isolated state and history.
 -   **SMA NaN Handling**: Improved `ta.sma` to correctly propagate `NaN` values and handle `NaN` contamination in the rolling window by falling back to full recalculation when necessary.
 -   **Transpiler Optimization**: Major optimization of user-defined function transpilation. Introduced local context (`$$`) for scoping variables, reducing transpiled code complexity and improving readability by removing redundant `_callId` argument passing.
 -   **Array Access in Expressions**: Fixed a bug in the transpiler where array access inside expressions (e.g. ternary operators) could use incorrect static scope keys.
-
-
 
 ## [0.8.3] - 2026-01-13 - Transpiler Critical Fixes
 
