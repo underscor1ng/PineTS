@@ -925,7 +925,7 @@ plot(result)
             // Should have dot-prefix number
             expect(jsCode).toContain('0.25');
             expect(jsCode).toContain('0.5');
-            
+
             // Should still have member access
             expect(jsCode).toContain('ta.sma');
         });
@@ -979,10 +979,10 @@ switch scenario
             const jsCode = result.toString();
 
             expect(jsCode).toBeDefined();
-            
+
             // Should contain switch with proper discriminant
             expect(jsCode).toContain('switch ($.get($.let.glb1_scenario, 0))');
-            
+
             // Should have both if statements in the "both" case
             expect(jsCode).toContain('$.get($.let.glb1_longCond, 0)');
             expect(jsCode).toContain('$.get($.let.glb1_shortCond, 0)');
@@ -1041,14 +1041,14 @@ switch scenario
             const jsCode = result.toString();
 
             expect(jsCode).toBeDefined();
-            
+
             // Verify switch discriminant is transformed
             expect(jsCode).toContain('switch ($.get($.let.glb1_scenario, 0))');
-            
+
             // Verify both conditions are preserved (should appear multiple times)
             const longCondMatches = (jsCode.match(/\$\.get\(\$\.let\.glb1_longCondition, 0\)/g) || []).length;
             const shortCondMatches = (jsCode.match(/\$\.get\(\$\.let\.glb1_shortCondition, 0\)/g) || []).length;
-            
+
             // Both conditions should appear at least twice (once per case in switch)
             expect(longCondMatches).toBeGreaterThanOrEqual(2);
             expect(shortCondMatches).toBeGreaterThanOrEqual(2);
@@ -1102,7 +1102,7 @@ plot(step * multiplier)
 
             // Generic type
             expect(jsCode).toContain("thresholds: 'array<float>'");
-            
+
             // Dot-prefix numbers
             expect(jsCode).toContain('0.5');
             expect(jsCode).toContain('0.25');
@@ -1136,17 +1136,71 @@ switch scenario
             const jsCode = result.toString();
 
             expect(jsCode).toBeDefined();
-            
+
             // Generic type
             expect(jsCode).toContain("entries: 'array<float>'");
-            
+
             // Dot-prefix numbers
             expect(jsCode).toContain('0.75');
             expect(jsCode).toContain('0.995');
-            
+
             // Switch with multiple statements
             expect(jsCode).toContain('switch ($.get($.let.glb1_scenario, 0))');
             expect(jsCode).toContain('$.get($.let.glb1_longCond, 0)');
+        });
+
+        it('should handle function and variable name collision', () => {
+            const code = `
+//@version=5
+indicator("bug")
+
+plus(x1, x2)=> x2*x1
+
+kernel_matrix(X1, X2, l)=>
+    km = matrix.new<float>(X1.size(), X2.size())    
+    
+    for x1 in X1
+        plus = plus(x1, 1)
+        j = 0    
+    km
+
+plot(close)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            // The variable 'plus' should be renamed to avoid collision with function 'plus'
+            expect(jsCode).toContain('plus_var');
+            // The function call 'plus(...)' should remain 'plus'
+            expect(jsCode).toContain('$.call(plus,');
+        });
+
+        it('should Pine Script arrays in for in loops', () => {
+            const code = `
+//@version=5
+indicator("bug")
+
+plus(x1, x2)=> x2*x1
+
+kernel_matrix(X1, X2, l)=>
+    km = matrix.new<float>(X1.size(), X2.size())    
+    
+    for x1 in X1
+        plus = plus(x1, 1)
+        j = 0    
+    km
+
+plot(close)
+            `;
+
+            const result = transpile(code);
+            const jsCode = result.toString();
+
+            expect(jsCode).toBeDefined();
+            // The variable 'plus' should be renamed to avoid collision with function 'plus'
+            expect(jsCode).toContain('for (const x1 of $.get(X1, 0).array)');
         });
     });
 });
@@ -1337,7 +1391,7 @@ plot(a), plot(b)
         expect(jsCode).toBeDefined();
         expect(jsCode).toContain('$.let.glb1_a');
         expect(jsCode).toContain('$.let.glb1_b');
-        
+
         // Should have two plot calls
         const plotCalls = (jsCode.match(/plot\.any/g) || []).length;
         expect(plotCalls).toBeGreaterThanOrEqual(2);
@@ -1366,7 +1420,7 @@ plot(close)
 
         expect(jsCode).toBeDefined();
         // Should contain for-of loop with $.get() on the iterable
-        expect(jsCode).toContain('for (const x1 of $.get(X1, 0))');
+        expect(jsCode).toContain('for (const x1 of $.get(X1, 0).array)');
         // Should NOT contain malformed loop syntax
         expect(jsCode).not.toMatch(/for \([^)]+= undefined[^)]*of/);
     });
@@ -1389,7 +1443,7 @@ plot(close)
         const jsCode = result.toString();
 
         // The iterable should use $.get(), but the loop variable should not be transformed
-        expect(jsCode).toContain('for (const item of $.get(arr, 0))');
+        expect(jsCode).toContain('for (const item of $.get(arr, 0).array)');
         expect(jsCode).not.toContain('$$.const.fn1_item');
     });
 
@@ -1412,7 +1466,7 @@ plot(close)
         const jsCode = result.toString();
 
         expect(jsCode).toBeDefined();
-        expect(jsCode).toContain('for (const val of $.get(values, 0))');
+        expect(jsCode).toContain('for (const val of $.get(values, 0).array)');
         // The temp variable inside the loop should be transformed
         expect(jsCode).toMatch(/\$\$\.let\.fn\d+_temp/);
     });
@@ -1439,8 +1493,8 @@ plot(close)
         const result = transpile(code);
         const jsCode = result.toString();
 
-        expect(jsCode).toContain('for (const x of $.get(arr1, 0))');
-        expect(jsCode).toContain('for (const y of $.get(arr2, 0))');
+        expect(jsCode).toContain('for (const x of $.get(arr1, 0).array)');
+        expect(jsCode).toContain('for (const y of $.get(arr2, 0).array)');
     });
 
     it('should handle for-of with array operations', () => {
@@ -1463,7 +1517,7 @@ plot(result)
         const jsCode = result.toString();
 
         expect(jsCode).toBeDefined();
-        expect(jsCode).toContain('for (const element of $.get(arr, 0))');
+        expect(jsCode).toContain('for (const element of $.get(arr, 0).array)');
     });
 });
 

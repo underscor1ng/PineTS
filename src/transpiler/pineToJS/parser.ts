@@ -40,6 +40,7 @@ import {
 export class Parser {
     private tokens: Token[];
     private pos: number;
+    private functionNames: Set<string> = new Set();
     constructor(tokens: Token[]) {
         this.tokens = tokens;
         this.pos = 0;
@@ -435,6 +436,10 @@ export class Parser {
             throw new Error(`Expected identifier after ${kind} at ${this.peek().line}:${this.peek().column}`);
         }
 
+        if (this.functionNames.has(name)) {
+            name = name + '_var';
+        }
+
         this.expect(TokenType.OPERATOR, '=');
         this.skipNewlines(true);
         const init = this.parseExpression();
@@ -456,7 +461,11 @@ export class Parser {
             varType += ' ' + this.advance().value;
         }
 
-        const name = this.expect(TokenType.IDENTIFIER).value;
+        let name = this.expect(TokenType.IDENTIFIER).value;
+        if (this.functionNames.has(name)) {
+            name = name + '_var';
+        }
+
         this.expect(TokenType.OPERATOR, '=');
         this.skipNewlines(true);
         const init = this.parseExpression();
@@ -475,6 +484,8 @@ export class Parser {
         }
 
         const name = this.expect(TokenType.IDENTIFIER).value;
+        this.functionNames.add(name);
+
         this.expect(TokenType.LPAREN);
 
         const params = [];
@@ -947,7 +958,11 @@ export class Parser {
 
         while (!this.match(TokenType.RBRACKET)) {
             this.skipNewlines();
-            elements.push(new Identifier(this.expect(TokenType.IDENTIFIER).value));
+            let name = this.expect(TokenType.IDENTIFIER).value;
+            if (this.functionNames.has(name)) {
+                name = name + '_var';
+            }
+            elements.push(new Identifier(name));
 
             if (this.match(TokenType.COMMA)) {
                 this.advance();
@@ -1237,7 +1252,11 @@ export class Parser {
         // Identifier
         if (this.match(TokenType.IDENTIFIER)) {
             const id = this.advance();
-            return new Identifier(id.value);
+            let name = id.value;
+            if (this.functionNames.has(name) && this.peek().type !== TokenType.LPAREN) {
+                name = name + '_var';
+            }
+            return new Identifier(name);
         }
 
         // Array literal

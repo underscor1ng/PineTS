@@ -36,7 +36,7 @@ export function transformArrayIndex(node: any, scopeManager: ScopeManager): void
         if (scopeManager.isLoopVariable(node.property.name)) {
             // Transform the object if it's a context-bound variable
             if (node.object.type === 'Identifier' && !scopeManager.isLoopVariable(node.object.name)) {
-                // Local series vars (e.g., function parameters) should be wrapped with $.get() 
+                // Local series vars (e.g., function parameters) should be wrapped with $.get()
                 // but stay as plain identifiers (not scoped to $.let.*)
                 if (scopeManager.isLocalSeriesVar(node.object.name)) {
                     // Transform to $.get(paramName, index)
@@ -75,7 +75,7 @@ export function transformArrayIndex(node: any, scopeManager: ScopeManager): void
             return;
         }
 
-        // Local series vars (e.g., function parameters) should be wrapped with $.get() 
+        // Local series vars (e.g., function parameters) should be wrapped with $.get()
         // but stay as plain identifiers (not scoped to $.let.*)
         if (scopeManager.isLocalSeriesVar(node.object.name)) {
             // Transform to $.get(paramName, index)
