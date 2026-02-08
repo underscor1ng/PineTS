@@ -115,7 +115,7 @@ function registerFunctionParameters(node: any, scopeManager: ScopeManager): void
 export function runAnalysisPass(ast: any, scopeManager: ScopeManager): string | undefined {
     let originalParamName: string | undefined;
 
-    walk.simple(ast, {
+    walk.ancestor(ast, {
         FunctionDeclaration(node: any) {
             registerFunctionParameters(node, scopeManager);
             if (node.id && node.id.name) {
@@ -130,7 +130,10 @@ export function runAnalysisPass(ast: any, scopeManager: ScopeManager): string | 
             }
             transformArrowFunctionParams(node, scopeManager, isRootFunction);
         },
-        VariableDeclaration(node: any) {
+        VariableDeclaration(node: any, ancestors: any[]) {
+            const parent = ancestors.length > 1 ? ancestors[ancestors.length - 2] : null;
+            const isForLoop = parent && (parent.type === 'ForOfStatement' || parent.type === 'ForInStatement') && parent.left === node;
+
             node.declarations.forEach((decl: any) => {
                 if (decl.id.type === 'Identifier') {
                     scopeManager.addReservedName(decl.id.name);
@@ -147,6 +150,8 @@ export function runAnalysisPass(ast: any, scopeManager: ScopeManager): string | 
                             scopeManager.addReservedName(element.name);
                         }
                     });
+
+                    if (isForLoop) return;
 
                     // Generate a unique temporary variable name
                     const tempVarName = scopeManager.generateTempVar();

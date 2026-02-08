@@ -155,7 +155,7 @@ export function transformVariableDeclaration(varNode: any, scopeManager: ScopeMa
 
     varNode.declarations.forEach((decl: any) => {
         //special case for na
-        if (decl.init.name == 'na') {
+        if (decl.init && decl.init.name == 'na') {
             decl.init.name = 'NaN';
         }
 
@@ -941,21 +941,23 @@ export function transformFunctionDeclaration(node: any, scopeManager: ScopeManag
 
         scopeManager.pushScope('fn');
         
-        // Register function parameters in the function scope
-        // They should be context-bound within this scope only
+        // Register function parameters as local series variables
+        // This ensures they:
+        // 1. Stay as plain identifiers (no renaming to $.let.scoped_name)
+        // 2. Get $.get() wrapping when used (e.g., X1.size() → $.get(X1, 0).size())
         node.params.forEach((param: any) => {
             if (param.type === 'Identifier') {
-                scopeManager.addContextBoundVar(param.name, false);
+                scopeManager.addLocalSeriesVar(param.name);
             }
         });
         
         // Just delegate to the callback to continue the recursion
         c(node.body, scopeManager);
         
-        // Clean up: remove parameters from context-bound after exiting function scope
+        // Clean up: remove function parameters from local series vars after exiting function scope
         node.params.forEach((param: any) => {
             if (param.type === 'Identifier') {
-                scopeManager.removeContextBoundVar(param.name);
+                scopeManager.removeLocalSeriesVar(param.name);
             }
         });
         

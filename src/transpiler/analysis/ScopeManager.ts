@@ -117,6 +117,10 @@ export class ScopeManager {
         this.localSeriesVars.add(name);
     }
 
+    removeLocalSeriesVar(name: string): void {
+        this.localSeriesVars.delete(name);
+    }
+
     isLocalSeriesVar(name: string): boolean {
         return this.localSeriesVars.has(name);
     }

@@ -36,6 +36,19 @@ export function transformArrayIndex(node: any, scopeManager: ScopeManager): void
         if (scopeManager.isLoopVariable(node.property.name)) {
             // Transform the object if it's a context-bound variable
             if (node.object.type === 'Identifier' && !scopeManager.isLoopVariable(node.object.name)) {
+                // Local series vars (e.g., function parameters) should be wrapped with $.get()
+                // but stay as plain identifiers (not scoped to $.let.*)
+                if (scopeManager.isLocalSeriesVar(node.object.name)) {
+                    // Transform to $.get(paramName, index)
+                    const plainIdentifier = ASTFactory.createIdentifier(node.object.name);
+                    // Mark this identifier to skip further transformations
+                    plainIdentifier._skipTransformation = true;
+                    const getCall = ASTFactory.createGetCall(plainIdentifier, node.property);
+                    Object.assign(node, getCall);
+                    node._indexTransformed = true;
+                    return;
+                }
+
                 if (!scopeManager.isContextBound(node.object.name)) {
                     // Transform to $.get($.kind.scopedName, loopVar)
                     const contextVarRef = createScopedVariableReference(node.object.name, scopeManager);
@@ -59,6 +72,19 @@ export function transformArrayIndex(node: any, scopeManager: ScopeManager): void
 
     if (node.computed && node.object.type === 'Identifier') {
         if (scopeManager.isLoopVariable(node.object.name)) {
+            return;
+        }
+
+        // Local series vars (e.g., function parameters) should be wrapped with $.get()
+        // but stay as plain identifiers (not scoped to $.let.*)
+        if (scopeManager.isLocalSeriesVar(node.object.name)) {
+            // Transform to $.get(paramName, index)
+            const plainIdentifier = ASTFactory.createIdentifier(node.object.name);
+            // Mark this identifier to skip further transformations
+            plainIdentifier._skipTransformation = true;
+            const getCall = ASTFactory.createGetCall(plainIdentifier, node.property);
+            Object.assign(node, getCall);
+            node._indexTransformed = true;
             return;
         }
 
@@ -88,6 +114,11 @@ export function addArrayAccess(node: any, scopeManager: ScopeManager): void {
 }
 
 export function transformIdentifier(node: any, scopeManager: ScopeManager): void {
+    // Skip if marked for no transformation (e.g., function parameters in $.get() calls)
+    if (node._skipTransformation) {
+        return;
+    }
+
     // Transform identifiers to use the context object
     if (node.name !== CONTEXT_NAME) {
         // Special handling for 'na' - replace with NaN unless it's a function call

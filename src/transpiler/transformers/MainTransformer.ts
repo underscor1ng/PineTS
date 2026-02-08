@@ -4,7 +4,7 @@
 import * as walk from 'acorn-walk';
 import ScopeManager from '../analysis/ScopeManager';
 import { ASTFactory } from '../utils/ASTFactory';
-import { transformIdentifier, transformCallExpression, transformMemberExpression } from './ExpressionTransformer';
+import { transformIdentifier, transformCallExpression, transformMemberExpression, addArrayAccess } from './ExpressionTransformer';
 import {
     transformVariableDeclaration,
     transformReturnStatement,
@@ -126,6 +126,83 @@ export function runTransformationPass(
         },
         FunctionExpression(node: any, state: ScopeManager, c: any) {
             // Traverse the body of function expressions
+            if (node.body) {
+                c(node.body, state);
+            }
+        },
+        ForOfStatement(node: any, state: ScopeManager, c: any) {
+            // Mark the left (variable declaration) to skip transformation
+            if (node.left && node.left.type === 'VariableDeclaration') {
+                node.left._skipTransformation = true;
+
+                // Register loop variables
+                const decl = node.left.declarations[0];
+                if (decl.id.type === 'Identifier') {
+                    state.addLoopVariable(decl.id.name);
+                } else if (decl.id.type === 'ArrayPattern') {
+                    decl.id.elements.forEach((elem: any) => {
+                        if (elem.type === 'Identifier') {
+                            state.addLoopVariable(elem.name);
+                        }
+                    });
+                }
+            }
+            // Transform the right (iterable expression) - parameters should use $.get()
+            if (node.right && node.right.type === 'Identifier') {
+                transformIdentifier(node.right, state);
+                addArrayAccess(node.right, state);
+                
+                // NEW: Access .array property for iteration over Pine Script arrays
+                // The node.right has been transformed to $.get(X, 0) in place by addArrayAccess
+                // We need to wrap it to access .array property: $.get(X, 0).array
+                
+                // Create a shallow copy of the current node.right (the CallExpression)
+                const currentRight = { ...node.right };
+                
+                // Create MemberExpression: currentRight.array
+                let arrayAccess = ASTFactory.createMemberExpression(
+                    currentRight,
+                    ASTFactory.createIdentifier('array'),
+                    false
+                );
+
+                // If destructuring, add .entries()
+                if (node.left && node.left.type === 'VariableDeclaration' && 
+                    node.left.declarations[0].id.type === 'ArrayPattern') {
+                    arrayAccess = ASTFactory.createCallExpression(
+                        ASTFactory.createMemberExpression(
+                            arrayAccess,
+                            ASTFactory.createIdentifier('entries'),
+                            false
+                        ),
+                        []
+                    );
+                }
+                
+                // Replace node.right with the new MemberExpression/CallExpression
+                Object.assign(node.right, arrayAccess);
+                
+            } else if (node.right) {
+                c(node.right, state);
+            }
+            // Traverse the body
+            if (node.body) {
+                c(node.body, state);
+            }
+        },
+        ForInStatement(node: any, state: ScopeManager, c: any) {
+            // Mark the left (variable declaration) to skip transformation
+            if (node.left && node.left.type === 'VariableDeclaration') {
+                node.left._skipTransformation = true;
+            }
+            // Transform the right (iterable expression) - parameters should use $.get()
+            if (node.right && node.right.type === 'Identifier') {
+                transformIdentifier(node.right, state);
+                addArrayAccess(node.right, state);
+            } else if (node.right) {
+                c(node.right, state);
+            }
+            // Traverse the body
             if (node.body) {
                 c(node.body, state);
             }
