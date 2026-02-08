@@ -386,6 +386,14 @@ Please feel free to open issues or submit pull requests.
 
 ---
 
+## Contributors
+
+<a href="https://github.com/QuantForgeOrg/PineTS/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=QuantForgeOrg/PineTS" />
+</a>
+
+---
+
 ## License
 
 AGPL-3.0 - See [LICENSE](LICENSE) for details.
